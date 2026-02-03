@@ -194,10 +194,24 @@ def generate_answer(
             }
         )
 
+    # Log retrieval results
+    from .realtime_logger import log_retrieval, log_generation
+
+    top_score = trace_chunks[0]["score"] if trace_chunks else 0.0
+    retrieval_ms = (retrieval_end - retrieval_start) * 1000
+    log_retrieval(len(trace_chunks), top_score, retrieval_ms)
+
     # Generate answer
     generation_start = time.time()
     answer = llm_generate(query, context_chunks)
     generation_end = time.time()
+
+    # Log generation
+    generation_ms = (generation_end - generation_start) * 1000
+    prompt_text = query + " ".join([c["text"] for c in context_chunks])
+    from .tracer import estimate_tokens as est_tokens
+
+    log_generation(est_tokens(prompt_text), est_tokens(answer), generation_ms)
 
     total_end = time.time()
 

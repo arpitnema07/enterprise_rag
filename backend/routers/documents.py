@@ -102,6 +102,16 @@ async def query_documents(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(database.get_db),
 ):
+    from ..rag.realtime_logger import log_request, log_response
+    import time
+
+    start_time = time.time()
+
+    # Log incoming request
+    log_request(
+        query_request.query, user_id=current_user.id, user_email=current_user.email
+    )
+
     # Get user's groups
     user_groups = (
         db.query(models.UserGroup)
@@ -126,6 +136,14 @@ async def query_documents(
         target_groups,
         user_id=current_user.id,
         user_email=current_user.email,
+    )
+
+    # Log response
+    total_time = (time.time() - start_time) * 1000
+    log_response(
+        response_length=len(result.get("answer", "")),
+        total_duration_ms=total_time,
+        user_id=current_user.id,
     )
 
     return result
