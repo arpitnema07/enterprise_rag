@@ -1,0 +1,14 @@
+prompts:
+  system_prompt:
+    latest_version: "v1"
+    versions:
+      - v1: "Initial prompt for vehicle reports with strict grounding"
+
+  query_rewrite:
+    latest_version: "v1"
+    versions:
+      - v1: "Initial query expansion prompt"
+
+metadata:
+  last_updated: "2026-01-30"
+  maintained_by: "AI Team"
