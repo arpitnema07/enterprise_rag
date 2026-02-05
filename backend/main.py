@@ -13,7 +13,8 @@ from .rag import retrieval
 # Create tables
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Vehicle Document RAG API")
+# Disable redirect_slashes to prevent CORS issues with trailing slash redirects
+app = FastAPI(title="Vehicle Document RAG API", redirect_slashes=False)
 
 # Ensure QDrant Collection Exists
 try:

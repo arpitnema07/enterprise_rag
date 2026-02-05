@@ -4,16 +4,17 @@ Uses Redis for session storage with automatic expiration.
 """
 
 import json
+import os
 from typing import List, Dict
 from uuid import uuid4
 
 # Redis client (lazy initialization)
 _redis_client = None
 
-# Configuration
-REDIS_HOST = "it38450"
-REDIS_PORT = 6379
-SESSION_TTL = 3600  # 1 hour
+# Configuration from environment
+REDIS_HOST = os.getenv("REDIS_HOST", "it38450")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+SESSION_TTL = int(os.getenv("SESSION_TIMEOUT", "3600"))  # Default 1 hour
 
 
 def _get_redis():

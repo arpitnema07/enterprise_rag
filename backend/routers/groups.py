@@ -31,7 +31,7 @@ def create_group(
     return db_group
 
 
-@router.get("/", response_model=List[schemas.Group])
+@router.get("", response_model=List[schemas.Group])
 def read_groups(
     skip: int = 0,
     limit: int = 100,

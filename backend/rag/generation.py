@@ -29,16 +29,22 @@ NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 _ollama_llm = Ollama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL)
 
 
-def _call_nvidia_api(prompt: str) -> str:
+def _call_nvidia_api(
+    prompt: str, max_retries: int = 3, initial_delay: float = 1.0
+) -> str:
     """
-    Call NVIDIA API for text generation.
+    Call NVIDIA API for text generation with retry logic.
 
     Args:
         prompt: The full prompt to send
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds before retry (default: 1.0)
 
     Returns:
         Generated text response
     """
+    import time
+
     if not NVIDIA_API_KEY:
         raise ValueError("NVIDIA_API_KEY environment variable not set")
 
@@ -59,22 +65,42 @@ def _call_nvidia_api(prompt: str) -> str:
         "max_tokens": 2048,
     }
 
-    try:
-        response = requests.post(
-            NVIDIA_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=120,
-            verify=False,  # For corporate proxies - disable in production
-        )
-        response.raise_for_status()
+    last_exception = None
 
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.post(
+                NVIDIA_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=180,  # Increased timeout for large responses
+                verify=False,  # For corporate proxies - disable in production
+            )
+            response.raise_for_status()
 
-    except requests.exceptions.RequestException as e:
-        print(f"NVIDIA API error: {e}")
-        raise
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = initial_delay * (2**attempt)  # Exponential backoff
+                print(
+                    f"NVIDIA API connection error (attempt {attempt + 1}/{max_retries + 1}): {e}"
+                )
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                print(f"NVIDIA API error after {max_retries + 1} attempts: {e}")
+                raise
+        except requests.exceptions.RequestException as e:
+            # For non-connection errors (like HTTP errors), don't retry
+            print(f"NVIDIA API error: {e}")
+            raise
+
+    # Should not reach here, but just in case
+    if last_exception:
+        raise last_exception
 
 
 def _invoke_llm(prompt: str) -> str:

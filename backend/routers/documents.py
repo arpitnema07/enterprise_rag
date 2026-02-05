@@ -156,10 +156,11 @@ async def chat(
     db: Session = Depends(database.get_db),
 ):
     """
-    Conversational chat endpoint with memory.
-    Supports multi-turn conversations with session persistence.
+    Conversational chat endpoint with agentic routing.
+    Uses intent classification for smart response routing.
     """
     from ..rag.conversation import ConversationManager
+    from ..rag.agentic_router import run_agentic_query
 
     # Get user's groups
     user_groups = (
@@ -174,13 +175,25 @@ async def chat(
             "answer": "You are not assigned to any groups.",
             "sources": [],
             "session_id": "",
+            "intent": "error",
         }
 
-    # If request specifies a group, verify access
+    # If request specifies a group, verify access and get prompt_type
+    prompt_type = "technical"  # default
+    target_group_id = None
+
     if request.group_id:
         if request.group_id not in group_ids:
             raise HTTPException(status_code=403, detail="No access to this group")
+        target_group_id = request.group_id
         target_groups = [request.group_id]
+
+        # Get group's prompt type
+        group = (
+            db.query(models.Group).filter(models.Group.id == request.group_id).first()
+        )
+        if group and group.prompt_type:
+            prompt_type = group.prompt_type
     else:
         target_groups = group_ids
 
@@ -202,12 +215,15 @@ async def chat(
     except Exception:
         history = []
 
-    # Generate answer with history and optional filters
-    result = rag_pipeline.generate_answer_with_context(
+    # Run through agentic router
+    result = run_agentic_query(
         query=request.message,
         group_ids=target_groups,
+        user_id=current_user.id,
+        session_id=conv_manager.session_key,
+        group_id=target_group_id,
+        prompt_type=prompt_type,
         history=history,
-        filters=request.filters,
     )
 
     # Store messages in conversation history
@@ -222,4 +238,6 @@ async def chat(
         "answer": result["answer"],
         "sources": result["sources"],
         "session_id": conv_manager.session_key,
+        "intent": result.get("intent"),
+        "latency": result.get("latency"),
     }

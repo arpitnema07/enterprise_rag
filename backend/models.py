@@ -23,6 +23,7 @@ class Group(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
+    prompt_type = Column(String, default="technical")  # technical, compliance, general
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships

@@ -35,6 +35,7 @@ class User(UserBase):
 # Group
 class GroupBase(BaseModel):
     name: str
+    prompt_type: Optional[str] = "technical"  # technical, compliance, general
 
 
 class GroupCreate(GroupBase):
@@ -89,3 +90,5 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[dict]
     session_id: str
+    intent: Optional[str] = None  # greeting, document_query, follow_up, etc.
+    latency: Optional[dict] = None

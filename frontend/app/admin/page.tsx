@@ -259,7 +259,15 @@ export default function AdminPage() {
                                         className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50"
                                         onClick={() => toggleGroup(group.id)}
                                     >
-                                        <span className="font-semibold text-gray-800">{group.name}</span>
+                                        <div className="flex items-center gap-3">
+                                            <span className="font-semibold text-gray-800">{group.name}</span>
+                                            <span className={`px-2 py-0.5 text-xs rounded-full ${group.prompt_type === 'technical' ? 'bg-blue-100 text-blue-700' :
+                                                    group.prompt_type === 'compliance' ? 'bg-green-100 text-green-700' :
+                                                        'bg-gray-100 text-gray-700'
+                                                }`}>
+                                                {group.prompt_type || 'technical'}
+                                            </span>
+                                        </div>
                                         <span className="text-xs text-gray-400">ID: {group.id}</span>
                                     </button>
 

@@ -40,6 +40,7 @@ interface Message {
     role: string;
     content: string;
     sources?: Source[];
+    intent?: string; // Intent classified by agentic router
 }
 
 // Custom Markdown components for proper table styling
@@ -284,15 +285,22 @@ export default function DashboardPage() {
         setIsQuerying(true);
 
         try {
-            const res = await api.post('/documents/query', {
-                query: userMessage.content,
-                group_id: selectedGroupId
+            const res = await api.post('/documents/chat', {
+                message: userMessage.content,
+                group_id: selectedGroupId,
+                session_id: sessionStorage.getItem('chat_session_id') || undefined
             });
+
+            // Store session ID for conversation continuity
+            if (res.data.session_id) {
+                sessionStorage.setItem('chat_session_id', res.data.session_id);
+            }
 
             const botMessage: Message = {
                 role: 'bot',
                 content: res.data.answer,
-                sources: res.data.sources
+                sources: res.data.sources,
+                intent: res.data.intent // NEW: show detected intent
             };
             setMessages((prev) => [...prev, botMessage]);
         } catch (err) {
