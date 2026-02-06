@@ -14,8 +14,8 @@ from .conversation import format_history
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia")  # "ollama" or "nvidia"
 
 # Ollama Configuration
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://it38450:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")
 
 # NVIDIA Configuration
 NVIDIA_API_KEY = os.getenv(
