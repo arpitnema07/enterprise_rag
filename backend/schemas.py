@@ -82,6 +82,7 @@ class Document(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    conversation_id: Optional[int] = None  # Link to persistent conversation
     group_id: Optional[int] = None
     filters: Optional[dict] = None  # Optional metadata filters
 
@@ -90,5 +91,45 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[dict]
     session_id: str
+    conversation_id: Optional[int] = None  # Persistent conversation ID
     intent: Optional[str] = None  # greeting, document_query, follow_up, etc.
     latency: Optional[dict] = None
+
+
+# Conversation (persistent chat history)
+class ChatMessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    sources: Optional[List[dict]] = None
+    intent: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationCreate(BaseModel):
+    title: Optional[str] = "New Chat"
+    group_id: Optional[int] = None
+
+
+class ConversationUpdate(BaseModel):
+    title: str
+
+
+class ConversationResponse(BaseModel):
+    id: int
+    title: str
+    group_id: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    message_count: Optional[int] = 0
+    last_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationWithMessages(ConversationResponse):
+    messages: List[ChatMessageResponse] = []

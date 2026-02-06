@@ -20,6 +20,7 @@ from .group_prompts import (
     PROMPT_TYPES,
 )
 from .realtime_logger import log_sync, LogType, LogLevel
+from .tracer import create_trace, log_trace, LatencyInfo, TokenInfo, estimate_tokens
 
 
 class AgentState(TypedDict):
@@ -361,6 +362,60 @@ def run_agentic_query(
         duration_ms=total_ms,
         user_id=user_id,
     )
+
+    # Log trace to traces.jsonl for monitoring
+    try:
+        # Build trace chunks from retrieved chunks
+        trace_chunks = []
+        for chunk in result.get("retrieved_chunks", []):
+            trace_chunks.append(
+                {
+                    "text": chunk.get("text", "")[:500] + "..."
+                    if len(chunk.get("text", "")) > 500
+                    else chunk.get("text", ""),
+                    "score": chunk.get("score", 0.0),
+                    "page_number": chunk.get("metadata", {}).get("page_number"),
+                    "file_path": chunk.get("metadata", {}).get("file_path"),
+                    "group_id": chunk.get("metadata", {}).get("group_id"),
+                }
+            )
+
+        # Create latency info
+        latency = LatencyInfo(
+            retrieval_ms=result["retrieval_ms"],
+            generation_ms=result["generation_ms"],
+            total_ms=total_ms,
+        )
+
+        # Estimate tokens
+        context_text = " ".join(
+            [c.get("text", "") for c in result.get("retrieved_chunks", [])]
+        )
+        prompt_text = query + context_text
+        tokens = TokenInfo(
+            prompt=estimate_tokens(prompt_text),
+            completion=estimate_tokens(result["response"]),
+            total=estimate_tokens(prompt_text) + estimate_tokens(result["response"]),
+        )
+
+        # Create and log trace
+        trace = create_trace(
+            query=query,
+            response=result["response"],
+            chunks=trace_chunks,
+            latency=latency,
+            tokens=tokens,
+            user_id=user_id,
+            metadata={
+                "intent": result["intent"],
+                "session_id": session_id,
+                "group_ids": group_ids,
+                "prompt_type": prompt_type,
+            },
+        )
+        log_trace(trace)
+    except Exception as e:
+        print(f"Warning: Failed to log trace: {e}")
 
     return {
         "answer": result["response"],

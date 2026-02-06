@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import Dict, Any
 import shutil
 import os
 import hashlib
@@ -158,7 +158,9 @@ async def chat(
     """
     Conversational chat endpoint with agentic routing.
     Uses intent classification for smart response routing.
+    Persists conversations to database with Redis cache for recent messages.
     """
+    import json
     from ..rag.conversation import ConversationManager
     from ..rag.agentic_router import run_agentic_query
 
@@ -175,6 +177,7 @@ async def chat(
             "answer": "You are not assigned to any groups.",
             "sources": [],
             "session_id": "",
+            "conversation_id": None,
             "intent": "error",
         }
 
@@ -197,7 +200,41 @@ async def chat(
     else:
         target_groups = group_ids
 
-    # Create or resume conversation
+    # Handle persistent conversation (database)
+    db_conversation = None
+    is_new_conversation = False
+
+    if request.conversation_id:
+        # Load existing conversation
+        db_conversation = (
+            db.query(models.Conversation)
+            .filter(
+                models.Conversation.id == request.conversation_id,
+                models.Conversation.user_id == current_user.id,
+            )
+            .first()
+        )
+        if not db_conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    else:
+        # Create new conversation
+        is_new_conversation = True
+        # Generate title from first message (truncate to 50 chars)
+        title = (
+            request.message[:50] + "..."
+            if len(request.message) > 50
+            else request.message
+        )
+        db_conversation = models.Conversation(
+            user_id=current_user.id,
+            title=title,
+            group_id=target_group_id,
+        )
+        db.add(db_conversation)
+        db.commit()
+        db.refresh(db_conversation)
+
+    # Create or resume Redis session for fast access to recent messages
     try:
         if request.session_id:
             conv_manager = ConversationManager.from_session(
@@ -209,11 +246,29 @@ async def chat(
         # If Redis is unavailable, create a new session
         conv_manager = ConversationManager(current_user.id, target_groups)
 
-    # Get conversation history
+    # Get conversation history from Redis (fast cache) or fallback to database
     try:
         history = conv_manager.get_history(last_n=5)
     except Exception:
         history = []
+
+    # If Redis history is empty but we have a conversation, load from database
+    if not history and db_conversation and not is_new_conversation:
+        try:
+            db_messages = (
+                db.query(models.ChatMessage)
+                .filter(models.ChatMessage.conversation_id == db_conversation.id)
+                .order_by(models.ChatMessage.created_at.desc())
+                .limit(10)
+                .all()
+            )
+            # Reverse to get chronological order
+            db_messages.reverse()
+            history = [
+                {"role": msg.role, "content": msg.content} for msg in db_messages
+            ]
+        except Exception:
+            history = []
 
     # Run through agentic router
     result = run_agentic_query(
@@ -226,7 +281,7 @@ async def chat(
         history=history,
     )
 
-    # Store messages in conversation history
+    # Store messages in Redis (cache) for quick access
     try:
         conv_manager.add_message("user", request.message)
         conv_manager.add_message("assistant", result["answer"])
@@ -234,10 +289,36 @@ async def chat(
         # Continue even if Redis storage fails
         pass
 
+    # Persist messages to database
+    try:
+        # Save user message
+        user_msg = models.ChatMessage(
+            conversation_id=db_conversation.id,
+            role="user",
+            content=request.message,
+        )
+        db.add(user_msg)
+
+        # Save assistant message with sources
+        sources_json = json.dumps(result["sources"]) if result.get("sources") else None
+        assistant_msg = models.ChatMessage(
+            conversation_id=db_conversation.id,
+            role="assistant",
+            content=result["answer"],
+            sources_json=sources_json,
+            intent=result.get("intent"),
+        )
+        db.add(assistant_msg)
+        db.commit()
+    except Exception as e:
+        # Log error but don't fail the request
+        print(f"Error saving messages to database: {e}")
+
     return {
         "answer": result["answer"],
         "sources": result["sources"],
         "session_id": conv_manager.session_key,
+        "conversation_id": db_conversation.id,
         "intent": result.get("intent"),
         "latency": result.get("latency"),
     }

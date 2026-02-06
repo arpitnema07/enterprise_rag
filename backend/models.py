@@ -56,3 +56,44 @@ class Document(Base):
     metadata_json = Column(String, nullable=True)
 
     group = relationship("Group", back_populates="documents")
+
+
+class Conversation(Base):
+    """Stores chat conversation sessions for persistence like ChatGPT."""
+
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    title = Column(String, default="New Chat")
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    user = relationship("User", backref="conversations")
+    group = relationship("Group")
+    messages = relationship(
+        "ChatMessage", back_populates="conversation", cascade="all, delete-orphan"
+    )
+
+
+class ChatMessage(Base):
+    """Stores individual chat messages within a conversation."""
+
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(
+        Integer, ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    role = Column(String)  # 'user' or 'assistant'
+    content = Column(String)
+    sources_json = Column(String, nullable=True)  # JSON string of sources
+    intent = Column(String, nullable=True)  # Intent classification for the message
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship
+    conversation = relationship("Conversation", back_populates="messages")

@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '@/lib/api';
-import { LogOut, Send, FileText, Plus, Settings, Upload, X, RefreshCw, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { LogOut, Send, FileText, Plus, Settings, Upload, X, RefreshCw, CheckCircle, AlertCircle, Loader2, MessageSquare, Trash2, Edit3, PanelLeftClose, PanelLeft } from 'lucide-react';
 
 interface User {
     email: string;
@@ -43,33 +43,43 @@ interface Message {
     intent?: string; // Intent classified by agentic router
 }
 
+interface Conversation {
+    id: number;
+    title: string;
+    group_id: number | null;
+    created_at: string;
+    updated_at: string;
+    message_count: number;
+    last_message: string | null;
+}
+
 // Custom Markdown components for proper table styling
 const MarkdownComponents = {
-    table: ({ children }: { children: React.ReactNode }) => (
+    table: ({ children }: { children?: React.ReactNode }) => (
         <div className="overflow-x-auto my-4">
             <table className="min-w-full border-collapse border border-gray-600 text-sm">
                 {children}
             </table>
         </div>
     ),
-    thead: ({ children }: { children: React.ReactNode }) => (
+    thead: ({ children }: { children?: React.ReactNode }) => (
         <thead className="bg-gray-700">{children}</thead>
     ),
-    tbody: ({ children }: { children: React.ReactNode }) => (
+    tbody: ({ children }: { children?: React.ReactNode }) => (
         <tbody className="divide-y divide-gray-600">{children}</tbody>
     ),
-    tr: ({ children }: { children: React.ReactNode }) => (
+    tr: ({ children }: { children?: React.ReactNode }) => (
         <tr className="border-b border-gray-600">{children}</tr>
     ),
-    th: ({ children }: { children: React.ReactNode }) => (
+    th: ({ children }: { children?: React.ReactNode }) => (
         <th className="px-4 py-2 text-left font-semibold text-gray-200 border border-gray-600">
             {children}
         </th>
     ),
-    td: ({ children }: { children: React.ReactNode }) => (
+    td: ({ children }: { children?: React.ReactNode }) => (
         <td className="px-4 py-2 text-gray-300 border border-gray-600">{children}</td>
     ),
-    code: ({ className, children }: { className?: string; children: React.ReactNode }) => {
+    code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
         const isInline = !className;
         if (isInline) {
             return (
@@ -84,44 +94,44 @@ const MarkdownComponents = {
             </code>
         );
     },
-    pre: ({ children }: { children: React.ReactNode }) => (
+    pre: ({ children }: { children?: React.ReactNode }) => (
         <pre className="bg-gray-900 rounded-lg overflow-x-auto my-4">{children}</pre>
     ),
-    ul: ({ children }: { children: React.ReactNode }) => (
+    ul: ({ children }: { children?: React.ReactNode }) => (
         <ul className="list-disc list-inside my-2 space-y-1 text-gray-300">{children}</ul>
     ),
-    ol: ({ children }: { children: React.ReactNode }) => (
+    ol: ({ children }: { children?: React.ReactNode }) => (
         <ol className="list-decimal list-inside my-2 space-y-1 text-gray-300">{children}</ol>
     ),
-    li: ({ children }: { children: React.ReactNode }) => (
+    li: ({ children }: { children?: React.ReactNode }) => (
         <li className="text-gray-300">{children}</li>
     ),
-    h1: ({ children }: { children: React.ReactNode }) => (
+    h1: ({ children }: { children?: React.ReactNode }) => (
         <h1 className="text-2xl font-bold text-white mt-4 mb-2">{children}</h1>
     ),
-    h2: ({ children }: { children: React.ReactNode }) => (
+    h2: ({ children }: { children?: React.ReactNode }) => (
         <h2 className="text-xl font-bold text-white mt-4 mb-2">{children}</h2>
     ),
-    h3: ({ children }: { children: React.ReactNode }) => (
+    h3: ({ children }: { children?: React.ReactNode }) => (
         <h3 className="text-lg font-semibold text-white mt-3 mb-1">{children}</h3>
     ),
-    p: ({ children }: { children: React.ReactNode }) => (
+    p: ({ children }: { children?: React.ReactNode }) => (
         <p className="text-gray-300 leading-relaxed my-2">{children}</p>
     ),
-    a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
         <a href={href} className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer">
             {children}
         </a>
     ),
-    blockquote: ({ children }: { children: React.ReactNode }) => (
+    blockquote: ({ children }: { children?: React.ReactNode }) => (
         <blockquote className="border-l-4 border-blue-500 pl-4 my-4 text-gray-400 italic">
             {children}
         </blockquote>
     ),
-    strong: ({ children }: { children: React.ReactNode }) => (
+    strong: ({ children }: { children?: React.ReactNode }) => (
         <strong className="font-semibold text-white">{children}</strong>
     ),
-    em: ({ children }: { children: React.ReactNode }) => (
+    em: ({ children }: { children?: React.ReactNode }) => (
         <em className="italic text-gray-300">{children}</em>
     ),
 };
@@ -140,6 +150,14 @@ export default function DashboardPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
+
+    // Chat history state
+    const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [currentConversationId, setCurrentConversationId] = useState<number | null>(null);
+    const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [editingConversationId, setEditingConversationId] = useState<number | null>(null);
+    const [editingTitle, setEditingTitle] = useState('');
+    const [loadingConversations, setLoadingConversations] = useState(false);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -169,6 +187,87 @@ export default function DashboardPage() {
     useEffect(() => {
         fetchUserAndGroups();
     }, [router]);
+
+    // Fetch conversations on load
+    const fetchConversations = useCallback(async () => {
+        setLoadingConversations(true);
+        try {
+            const res = await api.get('/conversations');
+            setConversations(res.data);
+        } catch (err) {
+            console.error('Failed to load conversations', err);
+        } finally {
+            setLoadingConversations(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchConversations();
+    }, [fetchConversations]);
+
+    // Load a specific conversation
+    const loadConversation = async (conversationId: number) => {
+        try {
+            const res = await api.get(`/conversations/${conversationId}`);
+            const conv = res.data;
+            setCurrentConversationId(conversationId);
+            if (conv.group_id) {
+                setSelectedGroupId(conv.group_id);
+            }
+            // Transform messages to local format
+            const loadedMessages: Message[] = conv.messages.map((msg: any) => ({
+                role: msg.role === 'assistant' ? 'bot' : msg.role,
+                content: msg.content,
+                sources: msg.sources || [],
+                intent: msg.intent,
+            }));
+            setMessages(loadedMessages);
+            // Clear session storage to use conversation_id instead
+            sessionStorage.removeItem('chat_session_id');
+        } catch (err) {
+            console.error('Failed to load conversation', err);
+        }
+    };
+
+    // Start a new chat
+    const startNewChat = () => {
+        setCurrentConversationId(null);
+        setMessages([]);
+        sessionStorage.removeItem('chat_session_id');
+    };
+
+    // Delete a conversation
+    const handleDeleteConversation = async (conversationId: number, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm('Delete this conversation?')) return;
+        try {
+            await api.delete(`/conversations/${conversationId}`);
+            setConversations(prev => prev.filter(c => c.id !== conversationId));
+            if (currentConversationId === conversationId) {
+                startNewChat();
+            }
+        } catch (err) {
+            console.error('Failed to delete conversation', err);
+        }
+    };
+
+    // Rename a conversation
+    const handleUpdateTitle = async (conversationId: number) => {
+        if (!editingTitle.trim()) {
+            setEditingConversationId(null);
+            return;
+        }
+        try {
+            await api.put(`/conversations/${conversationId}`, { title: editingTitle });
+            setConversations(prev => prev.map(c =>
+                c.id === conversationId ? { ...c, title: editingTitle } : c
+            ));
+            setEditingConversationId(null);
+            setEditingTitle('');
+        } catch (err) {
+            console.error('Failed to update conversation title', err);
+        }
+    };
 
     const handleLogout = () => {
         localStorage.removeItem('token');
@@ -288,12 +387,20 @@ export default function DashboardPage() {
             const res = await api.post('/documents/chat', {
                 message: userMessage.content,
                 group_id: selectedGroupId,
+                conversation_id: currentConversationId || undefined,
                 session_id: sessionStorage.getItem('chat_session_id') || undefined
             });
 
             // Store session ID for conversation continuity
             if (res.data.session_id) {
                 sessionStorage.setItem('chat_session_id', res.data.session_id);
+            }
+
+            // Store conversation ID for persistent history
+            if (res.data.conversation_id && !currentConversationId) {
+                setCurrentConversationId(res.data.conversation_id);
+                // Refresh conversation list to show the new conversation
+                fetchConversations();
             }
 
             const botMessage: Message = {
@@ -362,7 +469,101 @@ export default function DashboardPage() {
             </header>
 
             <main className="flex-1 flex overflow-hidden">
-                {/* Sidebar - Only for Admin */}
+                {/* Chat History Sidebar - Collapsible */}
+                <aside className={`bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-12'}`}>
+                    {/* Sidebar Toggle */}
+                    <div className="p-3 border-b border-gray-700 flex items-center justify-between">
+                        {sidebarOpen && <span className="text-sm font-semibold text-gray-300">Chat History</span>}
+                        <button
+                            onClick={() => setSidebarOpen(!sidebarOpen)}
+                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+                        >
+                            {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+                        </button>
+                    </div>
+
+                    {sidebarOpen && (
+                        <>
+                            {/* New Chat Button */}
+                            <div className="p-3">
+                                <button
+                                    onClick={startNewChat}
+                                    className="w-full flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                                >
+                                    <Plus size={16} />
+                                    New Chat
+                                </button>
+                            </div>
+
+                            {/* Conversation List */}
+                            <div className="flex-1 overflow-y-auto px-2">
+                                {loadingConversations ? (
+                                    <div className="flex items-center justify-center py-8">
+                                        <Loader2 size={20} className="animate-spin text-gray-400" />
+                                    </div>
+                                ) : conversations.length === 0 ? (
+                                    <p className="text-center text-gray-500 text-sm py-8">No conversations yet</p>
+                                ) : (
+                                    <div className="space-y-1 py-2">
+                                        {conversations.map(conv => (
+                                            <div
+                                                key={conv.id}
+                                                onClick={() => loadConversation(conv.id)}
+                                                className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${currentConversationId === conv.id
+                                                    ? 'bg-gray-700 text-white'
+                                                    : 'text-gray-400 hover:bg-gray-700/50 hover:text-gray-200'
+                                                    }`}
+                                            >
+                                                <MessageSquare size={14} className="shrink-0" />
+                                                {editingConversationId === conv.id ? (
+                                                    <input
+                                                        type="text"
+                                                        value={editingTitle}
+                                                        onChange={(e) => setEditingTitle(e.target.value)}
+                                                        onBlur={() => handleUpdateTitle(conv.id)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') handleUpdateTitle(conv.id);
+                                                            if (e.key === 'Escape') setEditingConversationId(null);
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        autoFocus
+                                                        className="flex-1 bg-gray-600 text-white text-sm px-1 py-0.5 rounded border border-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                    />
+                                                ) : (
+                                                    <span className="flex-1 text-sm truncate">{conv.title}</span>
+                                                )}
+                                                {/* Actions - show on hover */}
+                                                <div className="hidden group-hover:flex items-center gap-1">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setEditingConversationId(conv.id);
+                                                            setEditingTitle(conv.title);
+                                                        }}
+                                                        className="p-1 text-gray-400 hover:text-blue-400 transition-colors"
+                                                        title="Rename"
+                                                    >
+                                                        <Edit3 size={12} />
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => handleDeleteConversation(conv.id, e)}
+                                                        className="p-1 text-gray-400 hover:text-red-400 transition-colors"
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 size={12} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </aside>
+
+                {/* Admin Sidebar - Only for Admin */}
                 {isAdmin && (
                     <aside className="w-96 bg-gray-800 border-r border-gray-700 p-6 flex flex-col gap-6 overflow-y-auto">
                         {/* Group Selection */}

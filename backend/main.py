@@ -8,6 +8,7 @@ from .routers import documents as documents_router
 from .routers import admin as admin_router
 from .routers import traces as traces_router
 from .routers import websocket as websocket_router
+from .routers import conversations as conversations_router
 from .rag import retrieval
 
 # Create tables
@@ -37,6 +38,7 @@ app.include_router(documents_router.router)
 app.include_router(admin_router.router)
 app.include_router(traces_router.router)
 app.include_router(websocket_router.router)
+app.include_router(conversations_router.router)
 
 
 @app.get("/")
