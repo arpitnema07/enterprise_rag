@@ -11,7 +11,7 @@ from . import models
 # SECRET_KEY should be in .env, hardcoded for MVP dev
 SECRET_KEY = "supersecretkeyforencryption"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 43200  # 30 days
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")

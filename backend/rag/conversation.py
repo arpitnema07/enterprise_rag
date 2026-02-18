@@ -12,7 +12,7 @@ from uuid import uuid4
 _redis_client = None
 
 # Configuration from environment
-REDIS_HOST = os.getenv("REDIS_HOST", "it38450")
+REDIS_HOST = os.getenv("REDIS_HOST", "SRPTH1IDMQFS02.vecvnet.com")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 SESSION_TTL = int(os.getenv("SESSION_TIMEOUT", "3600"))  # Default 1 hour
 

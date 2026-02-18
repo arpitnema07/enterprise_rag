@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { LogOut, Trash2, Users, FileText, FolderOpen, Shield, ShieldOff, UserPlus, ArrowLeft, X, Zap, RefreshCw } from 'lucide-react';
+import { Trash2, Users, FileText, FolderOpen, Shield, ShieldOff, UserPlus, ArrowLeft, X, Zap, RefreshCw } from 'lucide-react';
 
 interface User {
     id: number;
@@ -69,10 +69,7 @@ export default function AdminPage() {
         fetchData();
     }, [router]);
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        router.push('/login');
-    };
+
 
     const handleReindex = async () => {
         // First, get stats
@@ -220,9 +217,6 @@ export default function AdminPage() {
                         <Zap size={16} /> Live Logs
                     </button>
                     <span className="text-gray-600">{currentUser?.email}</span>
-                    <button onClick={handleLogout} className="p-2 text-gray-500 hover:text-red-600">
-                        <LogOut size={20} />
-                    </button>
                 </div>
             </header>
 

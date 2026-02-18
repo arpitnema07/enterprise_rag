@@ -7,7 +7,7 @@ from langchain_community.embeddings import OllamaEmbeddings
 
 # Configuration
 EMBEDDING_MODEL = "nomic-embed-text"
-OLLAMA_BASE_URL = "http://it38450:11434"
+OLLAMA_BASE_URL = "http://SRPTH1IDMQFS02.vecvnet.com:11434"
 
 # Initialize embeddings
 _embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)

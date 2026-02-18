@@ -85,6 +85,10 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[int] = None  # Link to persistent conversation
     group_id: Optional[int] = None
     filters: Optional[dict] = None  # Optional metadata filters
+    model_provider: Optional[str] = None  # "ollama" or "nvidia"
+    model_name: Optional[str] = (
+        None  # e.g. "gemma3:4b" or "meta/llama-3.3-70b-instruct"
+    )
 
 
 class ChatResponse(BaseModel):

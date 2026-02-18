@@ -30,13 +30,20 @@ _ollama_llm = Ollama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL)
 
 
 def _call_nvidia_api(
-    prompt: str, max_retries: int = 3, initial_delay: float = 1.0
+    prompt: str,
+    system_prompt: str = None,
+    model_name: str = None,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
 ) -> str:
     """
     Call NVIDIA API for text generation with retry logic.
+    Uses separate system and user messages for better grounding.
 
     Args:
-        prompt: The full prompt to send
+        prompt: The user prompt to send
+        system_prompt: Optional system prompt for grounding instructions
+        model_name: Optional model override (defaults to NVIDIA_MODEL env var)
         max_retries: Maximum number of retry attempts (default: 3)
         initial_delay: Initial delay in seconds before retry (default: 1.0)
 
@@ -53,15 +60,16 @@ def _call_nvidia_api(
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
     }
 
+    # Build messages with proper role separation
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
     payload = {
-        "model": NVIDIA_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
-        "temperature": 0.2,
+        "model": model_name or NVIDIA_MODEL,
+        "messages": messages,
+        "temperature": 0.1,  # Low temperature for factual, grounded responses
         "max_tokens": 2048,
     }
 
@@ -103,20 +111,40 @@ def _call_nvidia_api(
         raise last_exception
 
 
-def _invoke_llm(prompt: str) -> str:
+def _invoke_llm(
+    prompt: str,
+    system_prompt: str = None,
+    model_provider: str = None,
+    model_name: str = None,
+) -> str:
     """
-    Invoke LLM using configured provider.
+    Invoke LLM using configured or requested provider.
 
     Args:
-        prompt: The prompt to send
+        prompt: The user prompt to send
+        system_prompt: Optional system-level instructions for grounding
+        model_provider: Optional override — "ollama" or "nvidia" (defaults to LLM_PROVIDER env)
+        model_name: Optional model name override
 
     Returns:
         Generated text response
     """
-    if LLM_PROVIDER == "nvidia":
-        return _call_nvidia_api(prompt)
+    provider = model_provider or LLM_PROVIDER
+
+    if provider == "nvidia":
+        return _call_nvidia_api(
+            prompt, system_prompt=system_prompt, model_name=model_name
+        )
     else:
-        return _ollama_llm.invoke(prompt)
+        # For Ollama, use per-request model if specified
+        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+        if model_name and model_name != OLLAMA_MODEL:
+            # Create a temporary Ollama instance for the requested model
+            from langchain_community.llms import Ollama as OllamaLLM
+
+            temp_llm = OllamaLLM(model=model_name, base_url=OLLAMA_BASE_URL)
+            return temp_llm.invoke(full_prompt)
+        return _ollama_llm.invoke(full_prompt)
 
 
 def format_context(context_chunks: List[Dict[str, Any]]) -> str:
@@ -161,26 +189,29 @@ def generate_answer(query: str, context_chunks: List[Dict[str, Any]]) -> str:
     # Build context string
     context = format_context(context_chunks)
 
-    prompt = f"""You are an expert assistant for vehicle test engineers. Your job is to answer questions using ONLY the provided context.
+    system_prompt = """You are an expert assistant for vehicle test engineers.
 
-## INSTRUCTIONS:
-1. **Answer directly** - Give the actual data/answer, not just where it's found
-2. **Include tables** - If the context contains tables relevant to the question, reproduce them in your answer using proper Markdown table format
-3. **Format properly** - Use Markdown: tables with |, headers with ##, lists with -
-4. **Cite sources** - After each piece of information, add a citation like [Page X, Document Y]
-5. **Be complete** - Include all relevant data from the context
-6. If no relevant data exists, say: "No data found in uploaded documents."
+## CRITICAL RULES - YOU MUST FOLLOW THESE:
+1. Answer ONLY using information from the CONTEXT provided below. Do NOT use any external or pre-trained knowledge.
+2. If the context does not contain the answer, respond ONLY with: "No data found in uploaded documents."
+3. NEVER fabricate, invent, or hallucinate data, names, values, standards, or references.
+4. Every claim MUST be directly traceable to the context. Cite sources as [Page X, Document Name].
+5. Reproduce data exactly as it appears in the context — do not paraphrase numbers, units, or test results.
+6. If a table is present in the context, reproduce it faithfully in Markdown format.
 
-## CONTEXT (Retrieved from documents):
+## FORMATTING RULES:
+- Answer directly — give the actual data/answer, not just where it's found
+- Include tables in proper Markdown format (| col1 | col2 |)
+- Use Markdown: tables with |, headers with ##, lists with -
+- Cite sources after each piece of information: [Page X, Document Y]"""
+
+    user_prompt = f"""## CONTEXT (Retrieved from documents):
 {context}
 
 ## USER QUESTION:
-{query}
+{query}"""
 
-## YOUR ANSWER (with tables in Markdown format and citations):
-"""
-
-    return _invoke_llm(prompt)
+    return _invoke_llm(user_prompt, system_prompt=system_prompt)
 
 
 def generate_answer_with_history(
@@ -211,38 +242,44 @@ def generate_answer_with_history(
 
     # Try to use versioned prompt, fall back to inline if not available
     try:
-        system_prompt = prompt_manager.render_prompt(
+        rendered_prompt = prompt_manager.render_prompt(
             prompt_name="system_prompt",
             version=prompt_version,
             context=context,
             history=history_text,
             query=query,
         )
+        return _invoke_llm(rendered_prompt)
     except FileNotFoundError:
-        # Fall back to inline prompt
-        system_prompt = f"""You are an expert assistant for vehicle test engineers. Answer questions using ONLY the provided context.
+        pass
 
-## INSTRUCTIONS:
-1. **Answer directly** - Give the actual data/answer, not just the location
-2. **Include tables** - Reproduce relevant tables in proper Markdown format (| col1 | col2 |)
-3. **Format properly** - Use Markdown formatting for clarity
-4. **Cite sources** - Add citations like [Page X, Filename] after each fact
-5. **Be complete** - Include all relevant data from the context
-6. If no relevant data exists, say: "No data found in uploaded documents."
+    # Fall back to inline prompt with system/user separation
+    system_prompt = """You are an expert assistant for vehicle test engineers.
 
-## CONTEXT (Retrieved from documents):
+## CRITICAL RULES - YOU MUST FOLLOW THESE:
+1. Answer ONLY using information from the CONTEXT provided below. Do NOT use any external or pre-trained knowledge.
+2. If the context does not contain the answer, respond ONLY with: "No data found in uploaded documents."
+3. NEVER fabricate, invent, or hallucinate data, names, values, standards, or references.
+4. Every claim MUST be directly traceable to the context. Cite sources as [Page X, Document Name].
+5. Reproduce data exactly as it appears in the context — do not paraphrase numbers, units, or test results.
+6. If a table is present in the context, reproduce it faithfully in Markdown format.
+
+## FORMATTING RULES:
+- Answer directly — give the actual data/answer, not just the location
+- Reproduce relevant tables in proper Markdown format (| col1 | col2 |)
+- Use Markdown formatting for clarity
+- Add citations like [Page X, Filename] after each fact"""
+
+    user_prompt = f"""## CONTEXT (Retrieved from documents):
 {context}
 
 ## CONVERSATION HISTORY:
 {history_text}
 
 ## USER QUESTION:
-{query}
+{query}"""
 
-## YOUR ANSWER (with tables in Markdown and citations):
-"""
-
-    return _invoke_llm(system_prompt)
+    return _invoke_llm(user_prompt, system_prompt=system_prompt)
 
 
 def generate_with_system_prompt(query: str, context: str, system_prompt: str) -> str:

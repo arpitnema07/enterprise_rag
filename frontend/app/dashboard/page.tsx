@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '@/lib/api';
-import { LogOut, Send, FileText, Plus, Settings, Upload, X, RefreshCw, CheckCircle, AlertCircle, Loader2, MessageSquare, Trash2, Edit3, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Send, FileText, Plus, Settings, Upload, X, RefreshCw, CheckCircle, AlertCircle, Loader2, MessageSquare, Trash2, Edit3, PanelLeftClose, PanelLeft, Cpu, Cloud } from 'lucide-react';
 
 interface User {
     email: string;
@@ -51,6 +51,14 @@ interface Conversation {
     updated_at: string;
     message_count: number;
     last_message: string | null;
+}
+
+interface ModelInfo {
+    name: string;
+    provider: string;
+    label: string;
+    size?: string;
+    description?: string;
 }
 
 // Custom Markdown components for proper table styling
@@ -159,6 +167,17 @@ export default function DashboardPage() {
     const [editingTitle, setEditingTitle] = useState('');
     const [loadingConversations, setLoadingConversations] = useState(false);
 
+    // Model selector state
+    const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
+    const [cloudModels, setCloudModels] = useState<ModelInfo[]>([]);
+    const [selectedModel, setSelectedModel] = useState<{ provider: string; name: string }>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('selected_llm_model');
+            if (saved) return JSON.parse(saved);
+        }
+        return { provider: '', name: '' }; // empty = server default
+    });
+
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
@@ -186,7 +205,32 @@ export default function DashboardPage() {
 
     useEffect(() => {
         fetchUserAndGroups();
+        fetchModels();
     }, [router]);
+
+    // Fetch available LLM models
+    const fetchModels = async () => {
+        try {
+            const res = await api.get('/models');
+            setOllamaModels(res.data.ollama || []);
+            setCloudModels(res.data.cloud || []);
+        } catch (err) {
+            console.error('Failed to fetch models', err);
+        }
+    };
+
+    const handleModelChange = (value: string) => {
+        if (value === 'default') {
+            const model = { provider: '', name: '' };
+            setSelectedModel(model);
+            localStorage.setItem('selected_llm_model', JSON.stringify(model));
+        } else {
+            const [provider, ...nameParts] = value.split(':');
+            const model = { provider, name: nameParts.join(':') };
+            setSelectedModel(model);
+            localStorage.setItem('selected_llm_model', JSON.stringify(model));
+        }
+    };
 
     // Fetch conversations on load
     const fetchConversations = useCallback(async () => {
@@ -269,10 +313,7 @@ export default function DashboardPage() {
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        router.push('/login');
-    };
+
 
     const handleCreateGroup = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -388,7 +429,9 @@ export default function DashboardPage() {
                 message: userMessage.content,
                 group_id: selectedGroupId,
                 conversation_id: currentConversationId || undefined,
-                session_id: sessionStorage.getItem('chat_session_id') || undefined
+                session_id: sessionStorage.getItem('chat_session_id') || undefined,
+                model_provider: selectedModel.provider || undefined,
+                model_name: selectedModel.name || undefined,
             });
 
             // Store session ID for conversation continuity
@@ -462,9 +505,6 @@ export default function DashboardPage() {
                         </button>
                     )}
                     <span className="text-gray-300">{user?.email}</span>
-                    <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-400 transition-colors">
-                        <LogOut size={20} />
-                    </button>
                 </div>
             </header>
 
@@ -784,6 +824,43 @@ export default function DashboardPage() {
 
                     {/* Input Area */}
                     <div className="p-4 bg-gray-800 border-t border-gray-700">
+                        {/* Model Selector */}
+                        <div className="flex items-center gap-2 mb-3 max-w-4xl mx-auto">
+                            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                                {selectedModel.provider === 'nvidia' ? (
+                                    <Cloud size={14} className="text-green-400" />
+                                ) : (
+                                    <Cpu size={14} className="text-blue-400" />
+                                )}
+                                <span>Model:</span>
+                            </div>
+                            <select
+                                value={selectedModel.provider && selectedModel.name ? `${selectedModel.provider}:${selectedModel.name}` : 'default'}
+                                onChange={(e) => handleModelChange(e.target.value)}
+                                className="flex-1 max-w-xs text-xs bg-gray-700 border border-gray-600 rounded-md px-2 py-1.5 text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                            >
+                                <option value="default">Server Default</option>
+                                {ollamaModels.length > 0 && (
+                                    <optgroup label="⚡ Local (Ollama)">
+                                        {ollamaModels.map(m => (
+                                            <option key={m.name} value={`ollama:${m.name}`}>
+                                                {m.label} ({m.size})
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                                {cloudModels.length > 0 && (
+                                    <optgroup label="☁️ Cloud (NVIDIA)">
+                                        {cloudModels.map(m => (
+                                            <option key={m.name} value={`nvidia:${m.name}`}>
+                                                {m.label}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                            </select>
+                        </div>
+
                         <form onSubmit={handleSearch} className="flex gap-4 max-w-4xl mx-auto">
                             <input
                                 type="text"

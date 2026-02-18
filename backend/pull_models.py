@@ -1,7 +1,7 @@
 import requests
 import json
 
-OLLAMA_BASE_URL = "http://it38450:11434"
+OLLAMA_BASE_URL = "http://SRPTH1IDMQFS02.vecvnet.com:11434"
 MODELS = ["nomic-embed-text", "gemma3:4b"]
 
 

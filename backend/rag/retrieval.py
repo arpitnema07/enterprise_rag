@@ -8,7 +8,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 
 # Configuration
-QDRANT_HOST = "it38450"
+QDRANT_HOST = "SRPTH1IDMQFS02.vecvnet.com"
 QDRANT_PORT = 6333
 COLLECTION_NAME = "vehicle_docs"
 

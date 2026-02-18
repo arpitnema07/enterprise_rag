@@ -161,6 +161,7 @@ async def chat(
     Persists conversations to database with Redis cache for recent messages.
     """
     import json
+    import asyncio
     from ..rag.conversation import ConversationManager
     from ..rag.agentic_router import run_agentic_query
 
@@ -270,8 +271,9 @@ async def chat(
         except Exception:
             history = []
 
-    # Run through agentic router
-    result = run_agentic_query(
+    # Run through agentic router in a background thread to avoid blocking the event loop
+    result = await asyncio.to_thread(
+        run_agentic_query,
         query=request.message,
         group_ids=target_groups,
         user_id=current_user.id,
@@ -279,6 +281,8 @@ async def chat(
         group_id=target_group_id,
         prompt_type=prompt_type,
         history=history,
+        model_provider=request.model_provider,
+        model_name=request.model_name,
     )
 
     # Store messages in Redis (cache) for quick access

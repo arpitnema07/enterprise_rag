@@ -17,9 +17,8 @@ from .group_prompts import (
     get_system_prompt,
     get_greeting_response,
     get_out_of_scope_response,
-    PROMPT_TYPES,
 )
-from .realtime_logger import log_sync, LogType, LogLevel
+from .realtime_logger import log_sync, LogType
 from .tracer import create_trace, log_trace, LatencyInfo, TokenInfo, estimate_tokens
 
 
@@ -34,6 +33,10 @@ class AgentState(TypedDict):
     group_ids: List[int]
     prompt_type: str
     history: List[Dict[str, str]]
+
+    # Model selection (per-request)
+    model_provider: str  # "ollama" or "nvidia"
+    model_name: str  # e.g. "gemma3:4b" or "meta/llama-3.3-70b-instruct"
 
     # Processing
     intent: str
@@ -211,12 +214,17 @@ def generate_node(state: AgentState) -> AgentState:
                 [f"{m['role'].upper()}: {m['content']}" for m in state["history"][-5:]]
             )
 
-        # Get prompt based on group's prompt type
+        # Get structured prompt (system + user) based on group's prompt type
         prompt_type = state.get("prompt_type", "general")
-        prompt = get_system_prompt(prompt_type, context, state["query"], history)
+        prompt_parts = get_system_prompt(prompt_type, context, state["query"], history)
 
-        # Generate response
-        response = _invoke_llm(prompt)
+        # Generate response with separate system and user prompts
+        response = _invoke_llm(
+            prompt_parts["user_prompt"],
+            system_prompt=prompt_parts["system_prompt"],
+            model_provider=state.get("model_provider"),
+            model_name=state.get("model_name"),
+        )
 
     generation_ms = (time.time() - start) * 1000
 
@@ -306,6 +314,8 @@ def run_agentic_query(
     group_id: int = None,
     prompt_type: str = "general",
     history: List[Dict[str, str]] = None,
+    model_provider: str = None,
+    model_name: str = None,
 ) -> Dict[str, Any]:
     """
     Run a query through the agentic router.
@@ -318,6 +328,8 @@ def run_agentic_query(
         group_id: Specific group to search (optional)
         prompt_type: Group's prompt type (technical/compliance/general)
         history: Conversation history
+        model_provider: LLM provider override ("ollama" or "nvidia")
+        model_name: LLM model name override
 
     Returns:
         Dict with response, sources, intent, and timing info
@@ -333,6 +345,8 @@ def run_agentic_query(
         "group_ids": group_ids,
         "prompt_type": prompt_type,
         "history": history or [],
+        "model_provider": model_provider or "",
+        "model_name": model_name or "",
         "intent": "",
         "intent_confidence": 0.0,
         "metadata_filters": {},

@@ -1,3 +1,17 @@
+from dotenv import load_dotenv
+from pathlib import Path
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+# Load environment variables from .env file in the project root
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+# Configure thread pool for concurrent LLM calls (default asyncio pool is too small)
+# This allows up to 10 blocking LLM requests to run concurrently via asyncio.to_thread()
+_executor = ThreadPoolExecutor(max_workers=10)
+asyncio.get_event_loop().set_default_executor(_executor)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from . import models
@@ -9,6 +23,7 @@ from .routers import admin as admin_router
 from .routers import traces as traces_router
 from .routers import websocket as websocket_router
 from .routers import conversations as conversations_router
+from .routers import models as models_router
 from .rag import retrieval
 
 # Create tables
@@ -39,6 +54,7 @@ app.include_router(admin_router.router)
 app.include_router(traces_router.router)
 app.include_router(websocket_router.router)
 app.include_router(conversations_router.router)
+app.include_router(models_router.router)
 
 
 @app.get("/")

@@ -8,8 +8,8 @@ from qdrant_client.http import models as rest
 
 # Model Config
 EMBEDDING_MODEL = "nomic-embed-text"
-CHAT_MODEL = "llama3.2"
-OLLAMA_BASE_URL = "http://it38450:11434"
+CHAT_MODEL = "llama3"
+OLLAMA_BASE_URL = "http://SRPTH1IDMQFS02.vecvnet.com:11434"
 
 embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
 llm = Ollama(model=CHAT_MODEL, base_url=OLLAMA_BASE_URL)
