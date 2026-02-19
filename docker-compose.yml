@@ -1,0 +1,88 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: always
+    volumes:
+      - /store/Arpit/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: vecvrag
+      POSTGRES_PASSWORD: vecvrag_pg_secret
+      POSTGRES_DB: vecvrag
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vecvrag -d vecvrag"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    volumes:
+      - /store/Arpit/redis:/data
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: always
+    volumes:
+      - /store/Arpit/qdrant:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    volumes:
+      - /store/Arpit/ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_NUM_PARALLEL=2
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: always
+    volumes:
+      - /store/Arpit/minio:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: vecvrag
+      MINIO_ROOT_PASSWORD: vecvrag_minio_secret
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    restart: always
+    volumes:
+      - /store/Arpit/clickhouse:/var/lib/clickhouse
+      - ./infra/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9009:9000"   # Native interface (remapped to avoid MinIO conflict)
+    environment:
+      CLICKHOUSE_DB: vecvrag
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144

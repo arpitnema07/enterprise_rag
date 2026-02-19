@@ -3,16 +3,17 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Use SQLite for local development MVP, plan to switch to PostgreSQL for prod
-SQLALCHEMY_DATABASE_URL = "sqlite:///./sql_app.db"
-# SQLALCHEMY_DATABASE_URL = "postgresql://user:password@postgresserver/db"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+# PostgreSQL connection — reads from DATABASE_URL env var
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://vecvrag:vecvrag_pg_secret@SRPTH1IDMQFS02.vecvnet.com:5432/vecvrag",
 )
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=20)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
 
 def get_db():
     db = SessionLocal()

@@ -1,16 +1,66 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 import shutil
 import os
+import re
 import hashlib
+import tempfile
+import json
+import asyncio
+import logging
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from .. import models, schemas, auth, database
 from ..rag import pipeline as rag_pipeline
+from ..services import minio_client
+
+logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 UPLOAD_DIR = "uploaded_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ---- File Upload Security ----
+
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # pptx
+    "application/vnd.ms-powerpoint",  # ppt
+}
+ALLOWED_EXTENSIONS = set(os.getenv("ALLOWED_EXTENSIONS", ".pdf,.ppt,.pptx").split(","))
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename — only allow safe characters."""
+    name, ext = os.path.splitext(filename)
+    safe_name = re.sub(r"[^\w\-.]", "_", name)
+    safe_name = safe_name.lstrip(".")
+    if not safe_name:
+        safe_name = "document"
+    return safe_name + ext.lower()
+
+
+def validate_upload(file: UploadFile) -> None:
+    """Validate file type before processing."""
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed. Accepted: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+
+    if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MIME type '{file.content_type}' not allowed. Upload PDF or PPTX files.",
+        )
 
 
 def calculate_file_hash(file_path: str) -> str:
@@ -22,14 +72,22 @@ def calculate_file_hash(file_path: str) -> str:
     return sha256_hash.hexdigest()
 
 
+# ---- Endpoints ----
+
+
 @router.post("/upload", response_model=Dict[str, Any])
+@limiter.limit("10/minute")
 async def upload_document(
+    request: Request,
     group_id: int,
     file: UploadFile = File(...),
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(database.get_db),
 ):
-    # Check if user belongs to the group
+    # Validate file type
+    validate_upload(file)
+
+    # Check group membership
     user_group = (
         db.query(models.UserGroup)
         .filter(
@@ -38,81 +96,117 @@ async def upload_document(
         )
         .first()
     )
-
     if not user_group:
         raise HTTPException(status_code=403, detail="Not a member of this group")
 
-    # Save file locally
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    safe_filename = sanitize_filename(file.filename)
+    temp_dir = tempfile.mkdtemp()
+    temp_path = os.path.join(temp_dir, safe_filename)
 
-    # Calculate file hash
-    file_hash = calculate_file_hash(file_path)
-
-    # Check for duplicate in same group
-    existing_doc = (
-        db.query(models.Document)
-        .filter(
-            models.Document.file_hash == file_hash, models.Document.group_id == group_id
-        )
-        .first()
-    )
-    if existing_doc:
-        # Remove the uploaded file since it's a duplicate
-        os.remove(file_path)
-        raise HTTPException(
-            status_code=409,
-            detail=f"Duplicate file. This file already exists as '{existing_doc.filename}'",
-        )
-
-    # Process PDF
     try:
-        num_chunks = rag_pipeline.process_pdf(
-            file_path, group_id, {"filename": file.filename}
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Check file size
+        if os.path.getsize(temp_path) > MAX_FILE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum size is {MAX_FILE_SIZE_MB}MB.",
+            )
+
+        file_hash = calculate_file_hash(temp_path)
+
+        # Check duplicate
+        existing_doc = (
+            db.query(models.Document)
+            .filter(
+                models.Document.file_hash == file_hash,
+                models.Document.group_id == group_id,
+            )
+            .first()
         )
-    except Exception as e:
-        import traceback
+        if existing_doc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate file. Already exists as '{existing_doc.filename}'",
+            )
 
-        traceback.print_exc()
-        os.remove(file_path)  # Clean up on failure
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+        # Upload to MinIO
+        object_key = f"group_{group_id}/{file_hash}_{safe_filename}"
+        try:
+            minio_client.upload_file(
+                temp_path,
+                object_key,
+                content_type=file.content_type or "application/octet-stream",
+            )
+        except Exception as e:
+            logger.error(f"MinIO upload failed: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500, detail="Failed to upload file to storage."
+            )
 
-    # Create Database Entry with hash
-    db_doc = models.Document(
-        filename=file.filename,
-        file_path=file_path,
-        file_hash=file_hash,
-        group_id=group_id,
-    )
-    db.add(db_doc)
-    db.commit()
-    db.refresh(db_doc)
+        # Local copy for processing
+        local_path = os.path.join(UPLOAD_DIR, safe_filename)
+        shutil.copy2(temp_path, local_path)
 
-    return {
-        "status": "success",
-        "document_id": db_doc.id,
-        "chunks_processed": num_chunks,
-    }
+        # Process PDF
+        try:
+            num_chunks = rag_pipeline.process_pdf(
+                local_path, group_id, {"filename": safe_filename}
+            )
+        except Exception as e:
+            logger.error(
+                f"PDF processing failed for {safe_filename}: {e}", exc_info=True
+            )
+            try:
+                minio_client.delete_file(object_key)
+            except Exception:
+                pass
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            raise HTTPException(
+                status_code=500, detail="Error processing file. Please try again."
+            )
+
+        db_doc = models.Document(
+            filename=safe_filename,
+            file_path=local_path,
+            file_hash=file_hash,
+            group_id=group_id,
+            object_key=object_key,
+            processing_status="done",
+            chunk_count=num_chunks,
+        )
+        db.add(db_doc)
+        db.commit()
+        db.refresh(db_doc)
+
+        return {
+            "status": "success",
+            "document_id": db_doc.id,
+            "chunks_processed": num_chunks,
+        }
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 @router.post("/query")
+@limiter.limit("30/minute")
 async def query_documents(
-    query_request: schemas.QueryRequest,  # Need to add this to schemas
+    request: Request,
+    query_request: schemas.QueryRequest,
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(database.get_db),
 ):
-    from ..rag.realtime_logger import log_request, log_response
+    from ..rag.observability import log_request, log_response
     import time
 
     start_time = time.time()
 
-    # Log incoming request
     log_request(
         query_request.query, user_id=current_user.id, user_email=current_user.email
     )
 
-    # Get user's groups
     user_groups = (
         db.query(models.UserGroup)
         .filter(models.UserGroup.user_id == current_user.id)
@@ -123,7 +217,6 @@ async def query_documents(
     if not group_ids:
         return {"answer": "You are not assigned to any groups.", "sources": []}
 
-    # If request specifies a group, verify access
     if query_request.group_id:
         if query_request.group_id not in group_ids:
             raise HTTPException(status_code=403, detail="No access to this group")
@@ -138,7 +231,6 @@ async def query_documents(
         user_email=current_user.email,
     )
 
-    # Log response
     total_time = (time.time() - start_time) * 1000
     log_response(
         response_length=len(result.get("answer", "")),
@@ -150,7 +242,9 @@ async def query_documents(
 
 
 @router.post("/chat")
+@limiter.limit("30/minute")
 async def chat(
+    http_request: Request,
     request: schemas.ChatRequest,
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(database.get_db),
@@ -160,8 +254,6 @@ async def chat(
     Uses intent classification for smart response routing.
     Persists conversations to database with Redis cache for recent messages.
     """
-    import json
-    import asyncio
     from ..rag.conversation import ConversationManager
     from ..rag.agentic_router import run_agentic_query
 
@@ -182,8 +274,8 @@ async def chat(
             "intent": "error",
         }
 
-    # If request specifies a group, verify access and get prompt_type
-    prompt_type = "technical"  # default
+    # Group access and prompt type
+    prompt_type = "technical"
     target_group_id = None
 
     if request.group_id:
@@ -192,7 +284,6 @@ async def chat(
         target_group_id = request.group_id
         target_groups = [request.group_id]
 
-        # Get group's prompt type
         group = (
             db.query(models.Group).filter(models.Group.id == request.group_id).first()
         )
@@ -201,12 +292,11 @@ async def chat(
     else:
         target_groups = group_ids
 
-    # Handle persistent conversation (database)
+    # Handle persistent conversation
     db_conversation = None
     is_new_conversation = False
 
     if request.conversation_id:
-        # Load existing conversation
         db_conversation = (
             db.query(models.Conversation)
             .filter(
@@ -218,9 +308,7 @@ async def chat(
         if not db_conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
     else:
-        # Create new conversation
         is_new_conversation = True
-        # Generate title from first message (truncate to 50 chars)
         title = (
             request.message[:50] + "..."
             if len(request.message) > 50
@@ -235,7 +323,7 @@ async def chat(
         db.commit()
         db.refresh(db_conversation)
 
-    # Create or resume Redis session for fast access to recent messages
+    # Redis session
     try:
         if request.session_id:
             conv_manager = ConversationManager.from_session(
@@ -244,16 +332,15 @@ async def chat(
         else:
             conv_manager = ConversationManager(current_user.id, target_groups)
     except Exception:
-        # If Redis is unavailable, create a new session
         conv_manager = ConversationManager(current_user.id, target_groups)
 
-    # Get conversation history from Redis (fast cache) or fallback to database
+    # Get history
     try:
         history = conv_manager.get_history(last_n=5)
     except Exception:
         history = []
 
-    # If Redis history is empty but we have a conversation, load from database
+    # DB fallback for history
     if not history and db_conversation and not is_new_conversation:
         try:
             db_messages = (
@@ -263,7 +350,6 @@ async def chat(
                 .limit(10)
                 .all()
             )
-            # Reverse to get chronological order
             db_messages.reverse()
             history = [
                 {"role": msg.role, "content": msg.content} for msg in db_messages
@@ -271,7 +357,7 @@ async def chat(
         except Exception:
             history = []
 
-    # Run through agentic router in a background thread to avoid blocking the event loop
+    # Run agentic query
     result = await asyncio.to_thread(
         run_agentic_query,
         query=request.message,
@@ -285,17 +371,15 @@ async def chat(
         model_name=request.model_name,
     )
 
-    # Store messages in Redis (cache) for quick access
+    # Cache in Redis
     try:
         conv_manager.add_message("user", request.message)
         conv_manager.add_message("assistant", result["answer"])
     except Exception:
-        # Continue even if Redis storage fails
         pass
 
-    # Persist messages to database
+    # Persist to DB
     try:
-        # Save user message
         user_msg = models.ChatMessage(
             conversation_id=db_conversation.id,
             role="user",
@@ -303,7 +387,6 @@ async def chat(
         )
         db.add(user_msg)
 
-        # Save assistant message with sources
         sources_json = json.dumps(result["sources"]) if result.get("sources") else None
         assistant_msg = models.ChatMessage(
             conversation_id=db_conversation.id,
@@ -315,8 +398,7 @@ async def chat(
         db.add(assistant_msg)
         db.commit()
     except Exception as e:
-        # Log error but don't fail the request
-        print(f"Error saving messages to database: {e}")
+        logger.error(f"Error saving messages to database: {e}", exc_info=True)
 
     return {
         "answer": result["answer"],

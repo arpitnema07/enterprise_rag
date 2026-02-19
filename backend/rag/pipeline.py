@@ -14,7 +14,13 @@ from .sparse_embeddings import embed_sparse
 from .metadata_extraction import extract_metadata, merge_metadata
 from .retrieval import upload_points, search, hybrid_search
 from .generation import generate_answer as llm_generate, generate_answer_with_history
-from .tracer import create_trace, log_trace, LatencyInfo, TokenInfo, estimate_tokens
+from .observability import (
+    log_retrieval,
+    log_generation,
+    log_response,
+    estimate_tokens,
+    generate_trace_id,
+)
 from .query_filters import extract_filters_from_query, build_enhanced_query
 from .pdf_extractor import extract_pdf_with_tables
 
@@ -195,11 +201,10 @@ def generate_answer(
         )
 
     # Log retrieval results
-    from .realtime_logger import log_retrieval, log_generation
-
     top_score = trace_chunks[0]["score"] if trace_chunks else 0.0
     retrieval_ms = (retrieval_end - retrieval_start) * 1000
-    log_retrieval(len(trace_chunks), top_score, retrieval_ms)
+    trace_id = generate_trace_id()
+    log_retrieval(len(trace_chunks), top_score, retrieval_ms, trace_id=trace_id)
 
     # Generate answer
     generation_start = time.time()
@@ -209,38 +214,29 @@ def generate_answer(
     # Log generation
     generation_ms = (generation_end - generation_start) * 1000
     prompt_text = query + " ".join([c["text"] for c in context_chunks])
-    from .tracer import estimate_tokens as est_tokens
-
-    log_generation(est_tokens(prompt_text), est_tokens(answer), generation_ms)
+    log_generation(
+        estimate_tokens(prompt_text),
+        estimate_tokens(answer),
+        generation_ms,
+        trace_id=trace_id,
+    )
 
     total_end = time.time()
+    total_ms = (total_end - total_start) * 1000
 
-    # Log trace
+    # Log unified trace
     try:
-        latency = LatencyInfo(
-            retrieval_ms=(retrieval_end - retrieval_start) * 1000,
-            generation_ms=(generation_end - generation_start) * 1000,
-            total_ms=(total_end - total_start) * 1000,
-        )
-
-        # Estimate tokens
-        prompt_text = query + " ".join([c["text"] for c in context_chunks])
-        tokens = TokenInfo(
-            prompt=estimate_tokens(prompt_text),
-            completion=estimate_tokens(answer),
-            total=estimate_tokens(prompt_text) + estimate_tokens(answer),
-        )
-
-        trace = create_trace(
+        total_tokens = estimate_tokens(prompt_text) + estimate_tokens(answer)
+        log_response(
             query=query,
-            response=answer,
+            response_text=answer,
             chunks=trace_chunks,
-            latency=latency,
-            tokens=tokens,
+            latency_ms=total_ms,
+            token_count=total_tokens,
+            trace_id=trace_id,
             user_id=user_id,
             user_email=user_email,
         )
-        log_trace(trace)
     except Exception as e:
         print(f"Warning: Failed to log trace: {e}")
 

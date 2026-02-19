@@ -55,6 +55,16 @@ class Document(Base):
     # Metadata stored as JSON string or separate table if complex
     metadata_json = Column(String, nullable=True)
 
+    # MinIO object storage key (e.g. "group_1/abc123_report.pdf")
+    object_key = Column(String, nullable=True)
+
+    # Background processing status: pending → processing → done → failed
+    processing_status = Column(String, default="done", nullable=True)
+    processing_error = Column(String, nullable=True)
+    task_id = Column(String, nullable=True)  # Celery task ID
+    chunk_count = Column(Integer, nullable=True)
+    page_count = Column(Integer, nullable=True)
+
     group = relationship("Group", back_populates="documents")
 
 

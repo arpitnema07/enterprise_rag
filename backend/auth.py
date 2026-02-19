@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -8,8 +9,8 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from . import models
 
-# SECRET_KEY should be in .env, hardcoded for MVP dev
-SECRET_KEY = "supersecretkeyforencryption"
+# Read SECRET_KEY from environment — NEVER hardcode in production
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback-dev-key-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 43200  # 30 days
 

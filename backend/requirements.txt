@@ -16,3 +16,8 @@ fastembed
 spacy
 redis
 pyyaml
+minio
+clickhouse-connect
+pdfplumber
+slowapi
+python-dotenv

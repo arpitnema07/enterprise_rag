@@ -18,8 +18,13 @@ from .group_prompts import (
     get_greeting_response,
     get_out_of_scope_response,
 )
-from .realtime_logger import log_sync, LogType
-from .tracer import create_trace, log_trace, LatencyInfo, TokenInfo, estimate_tokens
+from .observability import (
+    emit,
+    EventType,
+    estimate_tokens,
+    generate_trace_id,
+    log_response,
+)
 
 
 class AgentState(TypedDict):
@@ -58,10 +63,9 @@ def classify_intent_node(state: AgentState) -> AgentState:
     """Classify the user's intent."""
     intent, confidence = classify_intent(state["query"], state.get("history", []))
 
-    log_sync(
-        LogType.SYSTEM,
+    emit(
+        EventType.SYSTEM,
         f"Intent classified: {intent.value} (confidence: {confidence:.2f})",
-        details={"intent": intent.value, "confidence": confidence},
     )
 
     return {
@@ -75,7 +79,7 @@ def handle_greeting_node(state: AgentState) -> AgentState:
     """Handle greeting intent - no RAG needed."""
     response = get_greeting_response(state["query"])
 
-    log_sync(LogType.RESPONSE, "Greeting response generated")
+    emit(EventType.RESPONSE, "Greeting response generated")
 
     return {
         **state,
@@ -90,7 +94,7 @@ def handle_out_of_scope_node(state: AgentState) -> AgentState:
     """Handle out-of-scope queries."""
     response = get_out_of_scope_response(state["query"])
 
-    log_sync(LogType.RESPONSE, "Out-of-scope response generated")
+    emit(EventType.RESPONSE, "Out-of-scope response generated")
 
     return {
         **state,
@@ -105,10 +109,9 @@ def extract_metadata_node(state: AgentState) -> AgentState:
     """Extract metadata filters from query."""
     enhanced_query, filters = extract_filters_from_query(state["query"])
 
-    log_sync(
-        LogType.SYSTEM,
+    emit(
+        EventType.SYSTEM,
         f"Extracted filters: {filters}" if filters else "No filters extracted",
-        details={"filters": filters},
     )
 
     return {
@@ -177,14 +180,10 @@ def retrieve_node(state: AgentState) -> AgentState:
 
     retrieval_ms = (time.time() - start) * 1000
 
-    log_sync(
-        LogType.RETRIEVAL,
+    emit(
+        EventType.RETRIEVAL,
         f"Retrieved {len(chunks)} chunks",
-        duration_ms=retrieval_ms,
-        details={
-            "chunk_count": len(chunks),
-            "top_score": chunks[0]["score"] if chunks else 0,
-        },
+        latency_ms=retrieval_ms,
     )
 
     return {
@@ -228,10 +227,12 @@ def generate_node(state: AgentState) -> AgentState:
 
     generation_ms = (time.time() - start) * 1000
 
-    log_sync(
-        LogType.GENERATION,
+    emit(
+        EventType.GENERATION,
         f"Generated response ({len(response)} chars)",
-        duration_ms=generation_ms,
+        latency_ms=generation_ms,
+        model_provider=state.get("model_provider"),
+        model_name=state.get("model_name"),
     )
 
     return {
@@ -358,11 +359,12 @@ def run_agentic_query(
         "generation_ms": 0.0,
     }
 
-    log_sync(
-        LogType.REQUEST,
+    trace_id = generate_trace_id()
+    emit(
+        EventType.REQUEST,
         f"Agentic query: {query[:100]}...",
+        trace_id=trace_id,
         user_id=user_id,
-        details={"query": query, "group_ids": group_ids},
     )
 
     # Run graph
@@ -370,64 +372,38 @@ def run_agentic_query(
     result = graph.invoke(initial_state)
     total_ms = (time.time() - start) * 1000
 
-    log_sync(
-        LogType.RESPONSE,
-        f"Agentic response complete ({result['intent']})",
-        duration_ms=total_ms,
-        user_id=user_id,
-    )
-
-    # Log trace to traces.jsonl for monitoring
+    # Log unified trace to ClickHouse
     try:
-        # Build trace chunks from retrieved chunks
-        trace_chunks = []
-        for chunk in result.get("retrieved_chunks", []):
-            trace_chunks.append(
-                {
-                    "text": chunk.get("text", "")[:500] + "..."
-                    if len(chunk.get("text", "")) > 500
-                    else chunk.get("text", ""),
-                    "score": chunk.get("score", 0.0),
-                    "page_number": chunk.get("metadata", {}).get("page_number"),
-                    "file_path": chunk.get("metadata", {}).get("file_path"),
-                    "group_id": chunk.get("metadata", {}).get("group_id"),
-                }
-            )
+        trace_chunks = [
+            {
+                "text": c.get("text", "")[:500],
+                "score": c.get("score", 0.0),
+                "page_number": c.get("metadata", {}).get("page_number"),
+                "file_path": c.get("metadata", {}).get("file_path"),
+                "group_id": c.get("metadata", {}).get("group_id"),
+            }
+            for c in result.get("retrieved_chunks", [])
+        ]
 
-        # Create latency info
-        latency = LatencyInfo(
-            retrieval_ms=result["retrieval_ms"],
-            generation_ms=result["generation_ms"],
-            total_ms=total_ms,
-        )
-
-        # Estimate tokens
         context_text = " ".join(
-            [c.get("text", "") for c in result.get("retrieved_chunks", [])]
+            c.get("text", "") for c in result.get("retrieved_chunks", [])
         )
         prompt_text = query + context_text
-        tokens = TokenInfo(
-            prompt=estimate_tokens(prompt_text),
-            completion=estimate_tokens(result["response"]),
-            total=estimate_tokens(prompt_text) + estimate_tokens(result["response"]),
+        total_tokens = estimate_tokens(prompt_text) + estimate_tokens(
+            result["response"]
         )
 
-        # Create and log trace
-        trace = create_trace(
+        log_response(
             query=query,
-            response=result["response"],
+            response_text=result["response"],
             chunks=trace_chunks,
-            latency=latency,
-            tokens=tokens,
+            latency_ms=total_ms,
+            token_count=total_tokens,
+            trace_id=trace_id,
             user_id=user_id,
-            metadata={
-                "intent": result["intent"],
-                "session_id": session_id,
-                "group_ids": group_ids,
-                "prompt_type": prompt_type,
-            },
+            model_provider=model_provider,
+            model_name=model_name,
         )
-        log_trace(trace)
     except Exception as e:
         print(f"Warning: Failed to log trace: {e}")
 

@@ -1,15 +1,15 @@
 """
-WebSocket endpoint for realtime log streaming.
+WebSocket endpoint for realtime log/trace streaming.
+Uses the unified observability module.
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from ..rag.realtime_logger import (
+from ..rag.observability import (
     add_connection,
     remove_connection,
-    get_recent_logs,
     get_connection_count,
-    log_sync,
-    LogType,
+    emit,
+    EventType,
     LogLevel,
 )
 
@@ -19,30 +19,24 @@ router = APIRouter(prefix="/ws", tags=["websocket"])
 @router.websocket("/logs")
 async def websocket_logs(websocket: WebSocket):
     """
-    WebSocket endpoint for streaming realtime logs.
-    Connect to receive live log entries.
+    WebSocket endpoint for streaming realtime events.
+    Streams all observability events (logs + traces) live.
     """
     await websocket.accept()
 
     # Add connection
     conn = add_connection(websocket)
 
-    # Log connection
-    log_sync(
-        LogType.SYSTEM,
-        f"Admin connected to log stream (Total connections: {get_connection_count()})",
+    # Log connection event
+    emit(
+        EventType.SYSTEM,
+        f"Admin connected to event stream (Total: {get_connection_count()})",
         level=LogLevel.INFO,
     )
-
-    # Send recent logs on connect
-    recent = get_recent_logs(50)
-    for log_entry in reversed(recent):  # Send oldest first
-        await websocket.send_json(log_entry)
 
     try:
         # Keep connection alive
         while True:
-            # Wait for any message (heartbeat/ping)
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
@@ -50,8 +44,8 @@ async def websocket_logs(websocket: WebSocket):
         pass
     finally:
         remove_connection(conn)
-        log_sync(
-            LogType.SYSTEM,
-            f"Admin disconnected from log stream (Total connections: {get_connection_count()})",
+        emit(
+            EventType.SYSTEM,
+            f"Admin disconnected from event stream (Total: {get_connection_count()})",
             level=LogLevel.INFO,
         )

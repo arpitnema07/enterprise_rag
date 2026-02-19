@@ -7,10 +7,12 @@ from typing import List, Any, Dict, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 
-# Configuration
-QDRANT_HOST = "SRPTH1IDMQFS02.vecvnet.com"
-QDRANT_PORT = 6333
-COLLECTION_NAME = "vehicle_docs"
+import os
+
+# Configuration — read from environment
+QDRANT_HOST = os.getenv("QDRANT_HOST", "SRPTH1IDMQFS02.vecvnet.com")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "vehicle_docs")
 
 # Initialize client
 _client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
