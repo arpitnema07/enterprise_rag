@@ -145,49 +145,86 @@ async def upload_document(
                 status_code=500, detail="Failed to upload file to storage."
             )
 
-        # Local copy for processing
-        local_path = os.path.join(UPLOAD_DIR, safe_filename)
-        shutil.copy2(temp_path, local_path)
-
-        # Process PDF
-        try:
-            num_chunks = rag_pipeline.process_pdf(
-                local_path, group_id, {"filename": safe_filename}
-            )
-        except Exception as e:
-            logger.error(
-                f"PDF processing failed for {safe_filename}: {e}", exc_info=True
-            )
-            try:
-                minio_client.delete_file(object_key)
-            except Exception:
-                pass
-            if os.path.exists(local_path):
-                os.remove(local_path)
-            raise HTTPException(
-                status_code=500, detail="Error processing file. Please try again."
-            )
-
+        # Create DB record with pending status
         db_doc = models.Document(
             filename=safe_filename,
-            file_path=local_path,
+            file_path="",
             file_hash=file_hash,
             group_id=group_id,
             object_key=object_key,
-            processing_status="done",
-            chunk_count=num_chunks,
+            processing_status="pending",
         )
         db.add(db_doc)
         db.commit()
         db.refresh(db_doc)
 
+        # Dispatch Celery task for background processing
+        try:
+            from backend.tasks.document_tasks import process_document_task
+
+            task = process_document_task.delay(db_doc.id)
+            db_doc.task_id = task.id
+            db.commit()
+        except Exception as e:
+            # Celery not available — fall back to synchronous processing
+            logger.warning(f"Celery dispatch failed, processing synchronously: {e}")
+            try:
+                local_path = os.path.join(UPLOAD_DIR, safe_filename)
+                shutil.copy2(temp_path, local_path)
+                num_chunks = rag_pipeline.process_pdf(
+                    local_path, group_id, {"filename": safe_filename}
+                )
+                db_doc.file_path = local_path
+                db_doc.processing_status = "done"
+                db_doc.chunk_count = num_chunks
+                db.commit()
+            except Exception as proc_err:
+                logger.error(f"Sync fallback failed: {proc_err}", exc_info=True)
+                db_doc.processing_status = "failed"
+                db_doc.processing_error = str(proc_err)[:500]
+                db.commit()
+
         return {
-            "status": "success",
+            "status": "accepted",
             "document_id": db_doc.id,
-            "chunks_processed": num_chunks,
+            "processing_status": db_doc.processing_status,
+            "task_id": db_doc.task_id,
         }
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@router.get("/{doc_id}/status")
+async def get_document_status(
+    doc_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    """Poll document processing status."""
+    doc = db.query(models.Document).filter(models.Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Verify user has access (belongs to same group)
+    user_group = (
+        db.query(models.UserGroup)
+        .filter(
+            models.UserGroup.user_id == current_user.id,
+            models.UserGroup.group_id == doc.group_id,
+        )
+        .first()
+    )
+    if not user_group and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="No access to this document")
+
+    return {
+        "document_id": doc.id,
+        "filename": doc.filename,
+        "processing_status": doc.processing_status,
+        "chunk_count": doc.chunk_count,
+        "processing_error": doc.processing_error,
+        "task_id": doc.task_id,
+    }
 
 
 @router.post("/query")

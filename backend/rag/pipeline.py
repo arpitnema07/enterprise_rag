@@ -3,6 +3,7 @@ RAG Pipeline - Main orchestrator for PDF processing and query answering.
 Supports hybrid search with dense and sparse vectors.
 """
 
+import logging
 import uuid
 import time
 from typing import List, Dict, Any, Optional
@@ -24,10 +25,72 @@ from .observability import (
 from .query_filters import extract_filters_from_query, build_enhanced_query
 from .pdf_extractor import extract_pdf_with_tables
 
+logger = logging.getLogger(__name__)
+
+
+def _caption_images(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Generate captions for embedded images found in PDF pages.
+
+    Args:
+        pages: List of page dicts from extract_pdf_with_tables
+
+    Returns:
+        List of image caption chunks with 'text', 'page_number', 'chunk_type'
+    """
+    image_chunks = []
+
+    # Count total images first
+    total_images = sum(p.get("image_count", 0) for p in pages)
+    if total_images == 0:
+        return image_chunks
+
+    logger.info(f"Found {total_images} embedded images across {len(pages)} pages")
+
+    try:
+        from .vision import caption_image, is_vision_available
+
+        if not is_vision_available():
+            logger.warning("Vision model not available — skipping image captioning")
+            return image_chunks
+
+        captioned = 0
+        for page in pages:
+            page_images = page.get("images", [])
+            page_num = page.get("page_number", 1)
+
+            for img in page_images:
+                img_b64 = img.get("image_b64", "")
+                if not img_b64:
+                    continue
+
+                caption = caption_image(img_b64)
+                if caption:
+                    image_chunks.append(
+                        {
+                            "text": f"[Image on page {page_num}]: {caption}",
+                            "page_number": page_num,
+                            "chunk_type": "image_caption",
+                            "image_width": img.get("width", 0),
+                            "image_height": img.get("height", 0),
+                        }
+                    )
+                    captioned += 1
+
+        logger.info(f"Generated {captioned}/{total_images} image captions")
+
+    except ImportError:
+        logger.warning("Vision module not available — skipping image captioning")
+    except Exception as e:
+        logger.error(f"Image captioning failed: {e}")
+
+    return image_chunks
+
 
 def process_pdf(file_path: str, group_id: int, metadata: Dict[str, Any] = {}) -> int:
     """
-    Process a PDF file: extract text with tables, chunk, embed (dense + sparse), and store in Qdrant.
+    Process a PDF file: extract text with tables + OCR fallback, chunk,
+    embed (dense + sparse), caption images, and store in Qdrant.
 
     Args:
         file_path: Path to PDF file
@@ -37,8 +100,15 @@ def process_pdf(file_path: str, group_id: int, metadata: Dict[str, Any] = {}) ->
     Returns:
         Number of chunks processed
     """
-    # Use enhanced extraction with table detection
+    # Use enhanced extraction with table detection + hybrid OCR
     pages = extract_pdf_with_tables(file_path)
+
+    # Log extraction methods used
+    methods = {}
+    for p in pages:
+        m = p.get("extraction_method", "unknown")
+        methods[m] = methods.get(m, 0) + 1
+    logger.info(f"Extraction methods: {methods}")
 
     # Extract full document text for document-level metadata
     full_text = "\n".join([p.get("text", "") for p in pages])
@@ -50,23 +120,26 @@ def process_pdf(file_path: str, group_id: int, metadata: Dict[str, Any] = {}) ->
     # Chunk the pages (table-aware)
     chunks = chunk_pdf_pages(pages)
 
+    # Generate image captions and add as additional chunks
+    image_chunks = _caption_images(pages)
+    chunks.extend(image_chunks)
+
     # Create Qdrant points with both dense and sparse vectors
     points = []
     for chunk in chunks:
         chunk_id = str(uuid.uuid4())
         chunk_text = chunk["text"]
 
-        # Approach 1: Include filename/doc_id in searchable text
-        # This allows BM25 sparse search to match document names
+        # Include filename/doc_id in searchable text for BM25 matching
         filename_clean = doc_name.replace(".pdf", "").replace("_", " ")
         searchable_text = (
             f"[Document: {doc_name}] [File: {filename_clean}]\n{chunk_text}"
         )
 
-        # Generate dense embedding (using enhanced text)
+        # Generate dense embedding
         dense_vector = embed_text(searchable_text)
 
-        # Generate sparse embedding (BM25) - also use searchable text for filename matching
+        # Generate sparse embedding (BM25)
         sparse_vector = embed_sparse(searchable_text)
 
         # Extract chunk-level metadata
@@ -84,6 +157,8 @@ def process_pdf(file_path: str, group_id: int, metadata: Dict[str, Any] = {}) ->
                 "file_path": file_path,
                 "section": chunk.get("section", ""),
                 "doc_id": doc_name,
+                "chunk_type": chunk.get("chunk_type", "text"),
+                "extraction_method": chunk.get("extraction_method", "pdfplumber"),
                 "vehicle_model": merged_metadata.get("vehicle_model"),
                 "chassis_no": merged_metadata.get("chassis_no"),
                 "test_date": merged_metadata.get("test_date"),
@@ -112,6 +187,11 @@ def process_pdf(file_path: str, group_id: int, metadata: Dict[str, Any] = {}) ->
 
     # Upload to Qdrant
     upload_points(points)
+
+    logger.info(
+        f"Processed {file_path}: {len(points)} chunks "
+        f"({len(image_chunks)} image captions)"
+    )
 
     return len(points)
 

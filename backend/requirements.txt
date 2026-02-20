@@ -21,3 +21,5 @@ clickhouse-connect
 pdfplumber
 slowapi
 python-dotenv
+celery[redis]
+Pillow

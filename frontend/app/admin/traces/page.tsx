@@ -1,344 +1,171 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
-import {
-    ArrowLeft, RefreshCw, Search, ChevronDown, ChevronRight,
-    Clock, Zap, Hash, CheckCircle, XCircle, Trash2, Filter
-} from 'lucide-react';
+import { Activity, Filter, RefreshCw, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 
-interface Trace {
+interface TraceEvent {
+    event_id: string;
+    event_type: string;
+    level: string;
     trace_id: string;
+    message: string;
     timestamp: string;
-    user_id: number | null;
-    user_email: string | null;
-    query: string;
-    response: string;
-    chunks: ChunkInfo[];
-    latency: {
-        retrieval_ms: number;
-        generation_ms: number;
-        total_ms: number;
-    };
-    tokens: {
-        prompt: number;
-        completion: number;
-        total: number;
-    };
-    status: 'success' | 'error';
-    error: string | null;
+    user_id?: number;
+    user_email?: string;
+    data?: any;
 }
 
-interface ChunkInfo {
-    text: string;
-    score: number;
-    page_number: number;
-    file_path: string;
-    group_id: number;
-}
+const LEVEL_COLORS: Record<string, string> = {
+    info: 'text-blue-400',
+    warning: 'text-yellow-400',
+    error: 'text-red-400',
+    debug: 'text-gray-500',
+};
+
+const TYPE_COLORS: Record<string, string> = {
+    request: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    response: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    retrieval: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    generation: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    error: 'bg-red-500/10 text-red-400 border-red-500/20',
+    system: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
+};
 
 export default function TracesPage() {
-    const [traces, setTraces] = useState<Trace[]>([]);
-    const [total, setTotal] = useState(0);
+    const [events, setEvents] = useState<TraceEvent[]>([]);
     const [loading, setLoading] = useState(true);
-    const [expandedTrace, setExpandedTrace] = useState<string | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState<string>('');
-    const [autoRefresh, setAutoRefresh] = useState(false);
-    const [offset, setOffset] = useState(0);
-    const limit = 25;
-    const router = useRouter();
+    const [liveEvents, setLiveEvents] = useState<TraceEvent[]>([]);
+    const [isLive, setIsLive] = useState(false);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [filterType, setFilterType] = useState('');
+    const [filterLevel, setFilterLevel] = useState('');
+    const wsRef = useRef<WebSocket | null>(null);
 
-    const fetchTraces = useCallback(async () => {
-        try {
-            const params = new URLSearchParams({
-                limit: String(limit),
-                offset: String(offset),
-            });
-            if (searchQuery) params.append('search', searchQuery);
-            if (statusFilter) params.append('status', statusFilter);
+    // Fetch historical events
+    const fetchEvents = () => {
+        setLoading(true);
+        let url = '/traces?limit=100';
+        if (filterType) url += `&event_type=${filterType}`;
+        if (filterLevel) url += `&level=${filterLevel}`;
+        api.get(url).then(r => setEvents(r.data.events || r.data || [])).catch(console.error).finally(() => setLoading(false));
+    };
 
-            const res = await api.get(`/admin/traces?${params}`);
-            setTraces(res.data.traces);
-            setTotal(res.data.total);
-        } catch (err: any) {
-            if (err.response?.status === 403) {
-                router.push('/dashboard');
-            }
-            console.error('Failed to fetch traces', err);
-        } finally {
-            setLoading(false);
+    useEffect(() => { fetchEvents(); }, [filterType, filterLevel]);
+
+    // WebSocket for live events
+    const toggleLive = () => {
+        if (isLive) {
+            wsRef.current?.close();
+            wsRef.current = null;
+            setIsLive(false);
+            return;
         }
-    }, [offset, searchQuery, statusFilter, router]);
 
-    useEffect(() => {
-        fetchTraces();
-    }, [fetchTraces]);
-
-    useEffect(() => {
-        if (autoRefresh) {
-            const interval = setInterval(fetchTraces, 5000);
-            return () => clearInterval(interval);
-        }
-    }, [autoRefresh, fetchTraces]);
-
-    const handleClearTraces = async () => {
-        if (!confirm('Archive all traces? This will move them to a timestamped file.')) return;
-        try {
-            await api.delete('/admin/traces?confirm=true');
-            fetchTraces();
-        } catch (err) {
-            console.error('Failed to clear traces', err);
-        }
+        const host = process.env.NEXT_PUBLIC_WS_HOST || window.location.hostname;
+        const ws = new WebSocket(`ws://${host}:8000/ws/events`);
+        ws.onmessage = (ev) => {
+            try {
+                const data = JSON.parse(ev.data);
+                setLiveEvents(prev => [data, ...prev].slice(0, 200));
+            } catch { }
+        };
+        ws.onopen = () => setIsLive(true);
+        ws.onclose = () => setIsLive(false);
+        wsRef.current = ws;
     };
 
-    const formatDuration = (ms: number) => {
-        if (ms < 1000) return `${Math.round(ms)}ms`;
-        return `${(ms / 1000).toFixed(2)}s`;
-    };
+    useEffect(() => { return () => wsRef.current?.close(); }, []);
 
-    const formatDate = (iso: string) => {
-        const d = new Date(iso);
-        return d.toLocaleString();
-    };
-
-    const getStatusColor = (status: string) => {
-        return status === 'success'
-            ? 'bg-green-500/20 text-green-400 border-green-500/30'
-            : 'bg-red-500/20 text-red-400 border-red-500/30';
-    };
+    const allEvents = isLive ? [...liveEvents, ...events] : events;
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100">
-            {/* Header */}
-            <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
-                <div className="max-w-7xl mx-auto flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={() => router.push('/admin')}
-                            className="text-gray-400 hover:text-white transition-colors"
-                        >
-                            <ArrowLeft size={20} />
-                        </button>
-                        <h1 className="text-xl font-bold">Trace Monitor</h1>
-                        <span className="text-xs bg-blue-600 px-2 py-1 rounded-full">
-                            {total} traces
-                        </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <label className="flex items-center gap-2 text-sm text-gray-400">
-                            <input
-                                type="checkbox"
-                                checked={autoRefresh}
-                                onChange={(e) => setAutoRefresh(e.target.checked)}
-                                className="rounded bg-gray-700 border-gray-600"
-                            />
-                            Auto-refresh
-                        </label>
-                        <button
-                            onClick={fetchTraces}
-                            className="p-2 text-gray-400 hover:text-white transition-colors"
-                            title="Refresh"
-                        >
-                            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-                        </button>
-                        <button
-                            onClick={handleClearTraces}
-                            className="p-2 text-gray-400 hover:text-red-400 transition-colors"
-                            title="Archive All"
-                        >
-                            <Trash2 size={18} />
-                        </button>
-                    </div>
-                </div>
-            </header>
-
-            {/* Filters */}
-            <div className="bg-gray-800/50 border-b border-gray-700 px-6 py-3">
-                <div className="max-w-7xl mx-auto flex gap-4 items-center">
-                    <div className="relative flex-1 max-w-md">
-                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                        <input
-                            type="text"
-                            placeholder="Search queries..."
-                            value={searchQuery}
-                            onChange={(e) => { setSearchQuery(e.target.value); setOffset(0); }}
-                            className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        />
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Filter size={16} className="text-gray-500" />
-                        <select
-                            value={statusFilter}
-                            onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }}
-                            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
-                        >
-                            <option value="">All Status</option>
-                            <option value="success">Success</option>
-                            <option value="error">Error</option>
-                        </select>
-                    </div>
+        <div>
+            <div className="flex items-center justify-between mb-6">
+                <h1 className="text-xl font-bold text-gray-100">Traces & Events</h1>
+                <div className="flex items-center gap-3">
+                    <button onClick={toggleLive}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors
+              ${isLive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-600'}`}
+                    >
+                        <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+                        {isLive ? 'Live' : 'Go Live'}
+                    </button>
+                    <button onClick={fetchEvents} className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400" title="Refresh">
+                        <RefreshCw className="w-4 h-4" />
+                    </button>
                 </div>
             </div>
 
-            {/* Traces Table */}
-            <main className="max-w-7xl mx-auto p-6">
-                {loading ? (
-                    <div className="flex items-center justify-center py-20">
-                        <RefreshCw className="animate-spin text-blue-500" size={32} />
-                    </div>
-                ) : traces.length === 0 ? (
-                    <div className="text-center py-20 text-gray-500">
-                        <Zap size={48} className="mx-auto mb-4 opacity-50" />
-                        <p>No traces recorded yet. Make some queries to see them here.</p>
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {traces.map((trace) => (
-                            <div key={trace.trace_id} className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                                {/* Trace Row */}
+            {/* Filters */}
+            <div className="flex gap-3 mb-4">
+                <select value={filterType} onChange={e => setFilterType(e.target.value)}
+                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300">
+                    <option value="">All types</option>
+                    <option value="request">Request</option>
+                    <option value="response">Response</option>
+                    <option value="retrieval">Retrieval</option>
+                    <option value="generation">Generation</option>
+                    <option value="error">Error</option>
+                    <option value="system">System</option>
+                </select>
+                <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)}
+                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300">
+                    <option value="">All levels</option>
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="error">Error</option>
+                    <option value="debug">Debug</option>
+                </select>
+            </div>
+
+            {/* Events list */}
+            {loading ? (
+                <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-indigo-400" /></div>
+            ) : allEvents.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                    <Activity className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p>No events found.</p>
+                </div>
+            ) : (
+                <div className="space-y-1">
+                    {allEvents.map((ev, idx) => {
+                        const key = ev.event_id || `${ev.trace_id}-${idx}`;
+                        const isExpanded = expandedId === key;
+                        return (
+                            <div key={key} className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
                                 <button
-                                    onClick={() => setExpandedTrace(
-                                        expandedTrace === trace.trace_id ? null : trace.trace_id
-                                    )}
-                                    className="w-full px-4 py-3 flex items-center gap-4 hover:bg-gray-750 transition-colors text-left"
+                                    onClick={() => setExpandedId(isExpanded ? null : key)}
+                                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800/50 text-left text-sm"
                                 >
-                                    <div className="text-gray-500">
-                                        {expandedTrace === trace.trace_id
-                                            ? <ChevronDown size={18} />
-                                            : <ChevronRight size={18} />}
-                                    </div>
-
-                                    <div className={`px-2 py-1 rounded border text-xs font-medium ${getStatusColor(trace.status)}`}>
-                                        {trace.status === 'success'
-                                            ? <CheckCircle size={12} className="inline mr-1" />
-                                            : <XCircle size={12} className="inline mr-1" />}
-                                        {trace.status}
-                                    </div>
-
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-white truncate">{trace.query}</p>
-                                        <p className="text-xs text-gray-500">{formatDate(trace.timestamp)}</p>
-                                    </div>
-
-                                    <div className="flex items-center gap-4 text-xs text-gray-400">
-                                        <div className="flex items-center gap-1" title="Total Latency">
-                                            <Clock size={14} />
-                                            {formatDuration(trace.latency.total_ms)}
-                                        </div>
-                                        <div className="flex items-center gap-1" title="Tokens">
-                                            <Hash size={14} />
-                                            {trace.tokens.total}
-                                        </div>
-                                        <div title="Chunks Retrieved" className="text-gray-500">
-                                            {trace.chunks.length} chunks
-                                        </div>
-                                    </div>
+                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
+                                    <span className={`text-xs px-2 py-0.5 rounded-full border ${TYPE_COLORS[ev.event_type] || TYPE_COLORS.system}`}>
+                                        {ev.event_type}
+                                    </span>
+                                    <span className={`text-xs ${LEVEL_COLORS[ev.level] || 'text-gray-400'}`}>{ev.level}</span>
+                                    <span className="flex-1 text-gray-300 truncate">{ev.message}</span>
+                                    <span className="text-xs text-gray-600 flex-shrink-0">
+                                        {new Date(ev.timestamp).toLocaleTimeString()}
+                                    </span>
                                 </button>
-
-                                {/* Expanded Details */}
-                                {expandedTrace === trace.trace_id && (
-                                    <div className="border-t border-gray-700 bg-gray-900/50">
-                                        {/* Latency Breakdown */}
-                                        <div className="px-4 py-3 border-b border-gray-700">
-                                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Latency Breakdown</h4>
-                                            <div className="flex gap-6 text-sm">
-                                                <div>
-                                                    <span className="text-gray-500">Retrieval:</span>
-                                                    <span className="ml-2 text-blue-400">{formatDuration(trace.latency.retrieval_ms)}</span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-gray-500">Generation:</span>
-                                                    <span className="ml-2 text-purple-400">{formatDuration(trace.latency.generation_ms)}</span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-gray-500">Total:</span>
-                                                    <span className="ml-2 text-green-400">{formatDuration(trace.latency.total_ms)}</span>
-                                                </div>
-                                            </div>
+                                {isExpanded && (
+                                    <div className="border-t border-gray-800 px-4 py-3 text-xs space-y-1.5">
+                                        <div className="flex gap-8">
+                                            <span className="text-gray-500">Trace: <span className="text-gray-400 font-mono">{ev.trace_id || '—'}</span></span>
+                                            <span className="text-gray-500">User: <span className="text-gray-400">{ev.user_email || ev.user_id || '—'}</span></span>
                                         </div>
-
-                                        {/* Query & Response */}
-                                        <div className="px-4 py-3 border-b border-gray-700 grid grid-cols-2 gap-4">
-                                            <div>
-                                                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Query</h4>
-                                                <p className="text-sm text-gray-300 bg-gray-800 p-3 rounded-lg">{trace.query}</p>
-                                            </div>
-                                            <div>
-                                                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Response</h4>
-                                                <p className="text-sm text-gray-300 bg-gray-800 p-3 rounded-lg max-h-40 overflow-y-auto">{trace.response}</p>
-                                            </div>
-                                        </div>
-
-                                        {/* Retrieved Chunks */}
-                                        <div className="px-4 py-3">
-                                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">
-                                                Retrieved Chunks ({trace.chunks.length})
-                                            </h4>
-                                            <div className="space-y-2 max-h-60 overflow-y-auto">
-                                                {trace.chunks.map((chunk, i) => (
-                                                    <div key={i} className="bg-gray-800 p-3 rounded-lg border border-gray-700">
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <span className="text-xs text-gray-500">
-                                                                Score: <span className="text-yellow-400">{chunk.score?.toFixed(4) || 'N/A'}</span>
-                                                            </span>
-                                                            <span className="text-xs text-gray-500">
-                                                                Page {chunk.page_number}
-                                                            </span>
-                                                        </div>
-                                                        <p className="text-xs text-gray-400 leading-relaxed">{chunk.text}</p>
-                                                        <p className="text-xs text-gray-600 mt-2 truncate">{chunk.file_path}</p>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Error if present */}
-                                        {trace.error && (
-                                            <div className="px-4 py-3 bg-red-900/20 border-t border-red-700/50">
-                                                <h4 className="text-xs font-semibold text-red-400 uppercase mb-1">Error</h4>
-                                                <p className="text-sm text-red-300">{trace.error}</p>
-                                            </div>
+                                        {ev.data && (
+                                            <pre className="mt-2 bg-gray-950 rounded-lg p-3 overflow-x-auto text-gray-400 text-xs">
+                                                {typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data, null, 2)}
+                                            </pre>
                                         )}
-
-                                        {/* Metadata */}
-                                        <div className="px-4 py-3 bg-gray-800/50 text-xs text-gray-500 flex gap-6">
-                                            <span>Trace ID: {trace.trace_id}</span>
-                                            {trace.user_email && <span>User: {trace.user_email}</span>}
-                                            <span>Prompt tokens: {trace.tokens.prompt}</span>
-                                            <span>Completion tokens: {trace.tokens.completion}</span>
-                                        </div>
                                     </div>
                                 )}
                             </div>
-                        ))}
-
-                        {/* Pagination */}
-                        <div className="flex justify-between items-center pt-4">
-                            <span className="text-sm text-gray-500">
-                                Showing {offset + 1} - {Math.min(offset + traces.length, total)} of {total}
-                            </span>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setOffset(Math.max(0, offset - limit))}
-                                    disabled={offset === 0}
-                                    className="px-4 py-2 bg-gray-700 rounded-lg text-sm disabled:opacity-50 hover:bg-gray-600 transition-colors"
-                                >
-                                    Previous
-                                </button>
-                                <button
-                                    onClick={() => setOffset(offset + limit)}
-                                    disabled={offset + limit >= total}
-                                    className="px-4 py-2 bg-gray-700 rounded-lg text-sm disabled:opacity-50 hover:bg-gray-600 transition-colors"
-                                >
-                                    Next
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </main>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }
