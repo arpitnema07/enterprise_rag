@@ -40,11 +40,12 @@ def get_system_prompt(
 _GROUNDING_RULES = """
 ## CRITICAL RULES - YOU MUST FOLLOW THESE:
 1. Answer ONLY using information from the CONTEXT provided below. Do NOT use any external or pre-trained knowledge.
-2. If the context does not contain the answer, respond ONLY with: "This information is not available in the uploaded documents."
-3. NEVER fabricate, invent, or hallucinate data, names, values, standards, or references.
-4. Every claim MUST be directly traceable to the context. Cite sources as [Page X, Document Name].
-5. Reproduce data exactly as it appears in the context — do not paraphrase numbers, units, or test results.
-6. If a table is present in the context, reproduce it faithfully in Markdown format.
+2. If the user asks a specific question and the context does not contain the answer, respond ONLY with: "This information is not available in the uploaded documents."
+3. If the user query is broad (e.g. just a document name or topic), summarize the available information from the context related to that topic or list the matching documents.
+4. NEVER fabricate, invent, or hallucinate data, names, values, standards, or references.
+5. Every claim MUST be directly traceable to the context. Cite sources as [Page X, Document Name].
+6. Reproduce data exactly as it appears in the context — do not paraphrase numbers, units, or test results.
+7. If a table is present in the context and relevant to the query, reproduce it faithfully in Markdown format.
 """
 
 

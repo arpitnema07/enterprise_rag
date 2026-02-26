@@ -4,7 +4,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Optional
+from typing import List, Optional, Dict
 from .. import models, schemas, auth, database
 from ..rag import retrieval
 
@@ -46,6 +46,20 @@ def get_stats(
         .count()
     )
 
+    # ClickHouse query stats
+    query_stats = {"count": 0, "avg_latency_ms": 0, "errors": 0}
+    try:
+        from ..services import clickhouse_client
+
+        if clickhouse_client.health_check():
+            ch_stats = clickhouse_client.get_event_stats(hours=24)
+            if (
+                "response" in ch_stats
+            ):  # The "response" event marks a completed chat query
+                query_stats = ch_stats["response"]
+    except Exception as e:
+        logger.warning(f"Failed to fetch ClickHouse stats: {e}")
+
     # MinIO storage stats
     storage = {}
     try:
@@ -65,6 +79,7 @@ def get_stats(
             "processing": processing,
             "failed": failed,
         },
+        "queries_24h": query_stats,
         "storage": storage,
     }
 
@@ -164,7 +179,7 @@ def get_all_documents(
 
     docs = query.order_by(models.Document.upload_date.desc()).all()
 
-    return [
+    doc_list = [
         {
             "id": doc.id,
             "filename": doc.filename,
@@ -180,6 +195,34 @@ def get_all_documents(
         }
         for doc in docs
     ]
+
+    # Calculate smart retry_after_ms for polling
+    from datetime import datetime, timezone
+
+    active_docs = [d for d in docs if d.processing_status in ("pending", "processing")]
+    retry_after_ms = 0  # 0 = no polling needed
+
+    if active_docs:
+        # Find the oldest active doc to estimate how long processing has been going
+        now = datetime.now(timezone.utc)
+        oldest_start = min(
+            (d.upload_date for d in active_docs if d.upload_date),
+            default=now,
+        )
+        elapsed_seconds = (now - oldest_start).total_seconds()
+
+        # Adaptive backoff: start fast, slow down over time
+        #   < 2 min elapsed  → poll every 5s  (status just changed)
+        #   2-5 min elapsed  → poll every 10s (processing in progress)
+        #   > 5 min elapsed  → poll every 20s (long-running, e.g. OCR)
+        if elapsed_seconds < 120:
+            retry_after_ms = 5000
+        elif elapsed_seconds < 300:
+            retry_after_ms = 10000
+        else:
+            retry_after_ms = 20000
+
+    return {"documents": doc_list, "retry_after_ms": retry_after_ms}
 
 
 @router.get("/groups/{group_id}/documents")
@@ -472,7 +515,7 @@ def reindex_all_documents(
     for doc in documents:
         try:
             if doc.file_path and os.path.exists(doc.file_path):
-                rag_pipeline.process_pdf(
+                rag_pipeline.process_document(
                     doc.file_path, doc.group_id, {"filename": doc.filename}
                 )
                 success_count += 1
@@ -523,3 +566,26 @@ def get_llm_status(
     from ..rag.generation import get_current_provider
 
     return get_current_provider()
+
+
+@router.put("/llm-config")
+def update_llm_config(
+    config: Dict,
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Update LLM provider configuration at runtime."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    from ..rag.generation import update_provider
+
+    # Validate provider value
+    provider = config.get("provider")
+    if provider and provider not in ("ollama", "nvidia"):
+        raise HTTPException(
+            status_code=400, detail="Provider must be 'ollama' or 'nvidia'"
+        )
+
+    result = update_provider(config)
+    logger.info(f"Admin {current_user.email} updated LLM config: {result}")
+    return result

@@ -1,0 +1,73 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vecv_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_USER=vecvrag
+      - POSTGRES_PASSWORD=vecvrag_pg_secret
+      - POSTGRES_DB=vecvrag
+      - POSTGRES_HOST=postgres
+      - QDRANT_HOST=qdrant
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=vecvrag
+      - MINIO_SECRET_KEY=vecvrag_minio_secret
+      - CLICKHOUSE_HOST=clickhouse
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    volumes:
+      - ./.env:/app/.env
+    # The app depends on infra, so we use external network or assume they run in the same compose project
+    # depending on how the user runs it. For now, we assume they are run together or share a network.
+    networks:
+      - vecv_network
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vecv_celery
+    restart: always
+    command: ["celery", "-A", "backend.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    environment:
+      - POSTGRES_USER=vecvrag
+      - POSTGRES_PASSWORD=vecvrag_pg_secret
+      - POSTGRES_DB=vecvrag
+      - POSTGRES_HOST=postgres
+      - QDRANT_HOST=qdrant
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=vecvrag
+      - MINIO_SECRET_KEY=vecvrag_minio_secret
+      - CLICKHOUSE_HOST=clickhouse
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    volumes:
+      - ./.env:/app/.env
+    networks:
+      - vecv_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vecv_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - vecv_network
+
+networks:
+  vecv_network:
+    name: vecv_network
+    external: true

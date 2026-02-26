@@ -2,15 +2,26 @@
 Embeddings module for vector generation.
 """
 
+import os
 from typing import List
-from langchain_community.embeddings import OllamaEmbeddings
 
 # Configuration
 EMBEDDING_MODEL = "nomic-embed-text"
-OLLAMA_BASE_URL = "http://SRPTH1IDMQFS02.vecvnet.com:11434"
 
-# Initialize embeddings
-_embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
+# Lazy-initialize embeddings
+_embeddings = None
+
+
+def _get_embeddings():
+    global _embeddings
+    if _embeddings is None:
+        from langchain_community.embeddings import OllamaEmbeddings
+
+        base_url = os.getenv(
+            "OLLAMA_BASE_URL", "http://SRPTH1IDMQFS02.vecvnet.com:11434"
+        )
+        _embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=base_url)
+    return _embeddings
 
 
 def embed_text(text: str) -> List[float]:
@@ -23,7 +34,7 @@ def embed_text(text: str) -> List[float]:
     Returns:
         Embedding vector as list of floats
     """
-    return _embeddings.embed_query(text)
+    return _get_embeddings().embed_query(text)
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
@@ -36,4 +47,4 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     Returns:
         List of embedding vectors
     """
-    return _embeddings.embed_documents(texts)
+    return _get_embeddings().embed_documents(texts)

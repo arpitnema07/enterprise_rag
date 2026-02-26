@@ -425,37 +425,106 @@ export default function DashboardPage() {
         setIsQuerying(true);
 
         try {
-            const res = await api.post('/documents/chat', {
-                message: userMessage.content,
-                group_id: selectedGroupId,
-                conversation_id: currentConversationId || undefined,
-                session_id: sessionStorage.getItem('chat_session_id') || undefined,
-                model_provider: selectedModel.provider || undefined,
-                model_name: selectedModel.name || undefined,
+            const token = localStorage.getItem('token');
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+            // Add initial empty bot message
+            const botMessageId = Date.now().toString();
+            setMessages(prev => [
+                ...prev,
+                { role: 'bot', content: '', id: botMessageId }
+            ]);
+
+            const response = await fetch(`${apiUrl}/documents/chat-stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({
+                    message: userMessage.content,
+                    group_id: selectedGroupId,
+                    conversation_id: currentConversationId || undefined,
+                    session_id: sessionStorage.getItem('chat_session_id') || undefined,
+                    model_provider: selectedModel.provider || undefined,
+                    model_name: selectedModel.name || undefined,
+                })
             });
 
-            // Store session ID for conversation continuity
-            if (res.data.session_id) {
-                sessionStorage.setItem('chat_session_id', res.data.session_id);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            // Store conversation ID for persistent history
-            if (res.data.conversation_id && !currentConversationId) {
-                setCurrentConversationId(res.data.conversation_id);
-                // Refresh conversation list to show the new conversation
-                fetchConversations();
-            }
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedContent = '';
+            let buffer = '';
 
-            const botMessage: Message = {
-                role: 'bot',
-                content: res.data.answer,
-                sources: res.data.sources,
-                intent: res.data.intent // NEW: show detected intent
-            };
-            setMessages((prev) => [...prev, botMessage]);
+            if (reader) {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.slice(6).trim();
+                            if (!dataStr || dataStr === '[DONE]') continue;
+
+                            try {
+                                const data = JSON.parse(dataStr);
+
+                                if (data.type === 'chunk') {
+                                    accumulatedContent += data.content;
+                                    setMessages(prev => {
+                                        const newMsgs = [...prev];
+                                        const lastMsgIdx = newMsgs.length - 1;
+                                        if (newMsgs[lastMsgIdx].role === 'bot') {
+                                            newMsgs[lastMsgIdx] = {
+                                                ...newMsgs[lastMsgIdx],
+                                                content: accumulatedContent
+                                            };
+                                        }
+                                        return newMsgs;
+                                    });
+                                } else if (data.type === 'end') {
+                                    // Finalize message with sources and metadata
+                                    setMessages(prev => {
+                                        const newMsgs = [...prev];
+                                        const lastMsgIdx = newMsgs.length - 1;
+                                        if (newMsgs[lastMsgIdx].role === 'bot') {
+                                            newMsgs[lastMsgIdx] = {
+                                                ...newMsgs[lastMsgIdx],
+                                                sources: data.sources || [],
+                                                intent: data.intent || 'unknown'
+                                            };
+                                        }
+                                        return newMsgs;
+                                    });
+
+                                    if (data.session_id) {
+                                        sessionStorage.setItem('chat_session_id', data.session_id);
+                                    }
+                                    if (data.conversation_id && !currentConversationId) {
+                                        setCurrentConversationId(data.conversation_id);
+                                        fetchConversations();
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE data:', e, dataStr);
+                            }
+                        }
+                    }
+                }
+            }
         } catch (err) {
-            console.error(err);
-            setMessages((prev) => [...prev, { role: 'bot', content: 'Error processing query.' }]);
+            console.error('Chat error:', err);
+            setMessages(prev => [...prev, { role: 'bot', content: 'An error occurred while communicating with the server.' }]);
         } finally {
             setIsQuerying(false);
         }
@@ -487,39 +556,39 @@ export default function DashboardPage() {
     };
 
     return (
-        <div className="flex flex-col h-screen bg-gray-900">
+        <div className="flex flex-col h-screen bg-zinc-950 text-zinc-300">
             {/* Header */}
-            <header className="bg-gray-800 border-b border-gray-700 px-6 py-4 flex justify-between items-center">
+            <header className="fixed top-0 w-full z-10 bg-zinc-900/80 backdrop-blur-xl border-b border-zinc-800/50 px-6 py-4 flex justify-between items-center shadow-sm">
                 <div className="flex items-center gap-2">
-                    <h1 className="text-xl font-semibold text-white">Vehicle RAG System</h1>
-                    {isAdmin && <span className="bg-blue-600 text-blue-100 text-xs px-2 py-1 rounded-full">Admin</span>}
+                    <h1 className="text-xl font-semibold bg-gradient-to-r from-zinc-100 to-zinc-400 bg-clip-text text-transparent">Vehicle RAG System</h1>
+                    {isAdmin && <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs px-2 py-1 rounded-full">Admin</span>}
                 </div>
                 <div className="flex items-center gap-4">
                     {isAdmin && (
                         <button
                             onClick={() => router.push('/admin')}
-                            className="p-2 text-gray-400 hover:text-blue-400 transition-colors"
+                            className="p-2 text-zinc-400 hover:text-blue-400 hover:bg-zinc-800/50 rounded-lg transition-all"
                             title="Admin Panel"
                         >
                             <Settings size={20} />
                         </button>
                     )}
-                    <span className="text-gray-300">{user?.email}</span>
+                    <span className="text-zinc-400 text-sm">{user?.email}</span>
                 </div>
             </header>
 
-            <main className="flex-1 flex overflow-hidden">
+            <main className="flex-1 flex overflow-hidden pt-[73px]">
                 {/* Chat History Sidebar - Collapsible */}
-                <aside className={`bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-12'}`}>
+                <aside className={`bg-zinc-900/60 backdrop-blur-md border-r border-zinc-800/50 flex flex-col transition-all duration-300 relative ${sidebarOpen ? 'w-64' : 'w-12'} shrink-0 z-0`}>
                     {/* Sidebar Toggle */}
-                    <div className="p-3 border-b border-gray-700 flex items-center justify-between">
-                        {sidebarOpen && <span className="text-sm font-semibold text-gray-300">Chat History</span>}
+                    <div className="p-3 border-b border-zinc-800/50 flex items-center justify-between">
+                        {sidebarOpen && <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Chat History</span>}
                         <button
                             onClick={() => setSidebarOpen(!sidebarOpen)}
-                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                            className="p-1.5 text-zinc-500 rounded-md hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
                             title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
                         >
-                            {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+                            {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
                         </button>
                     </div>
 
@@ -529,33 +598,33 @@ export default function DashboardPage() {
                             <div className="p-3">
                                 <button
                                     onClick={startNewChat}
-                                    className="w-full flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700/50 hover:border-zinc-600 rounded-xl transition-all shadow-sm"
                                 >
                                     <Plus size={16} />
-                                    New Chat
+                                    <span className="text-sm font-medium">New Chat</span>
                                 </button>
                             </div>
 
                             {/* Conversation List */}
-                            <div className="flex-1 overflow-y-auto px-2">
+                            <div className="flex-1 overflow-y-auto px-2 space-y-1 mt-2">
                                 {loadingConversations ? (
                                     <div className="flex items-center justify-center py-8">
-                                        <Loader2 size={20} className="animate-spin text-gray-400" />
+                                        <Loader2 size={18} className="animate-spin text-zinc-500" />
                                     </div>
                                 ) : conversations.length === 0 ? (
-                                    <p className="text-center text-gray-500 text-sm py-8">No conversations yet</p>
+                                    <p className="text-center text-zinc-500 text-xs py-8">No conversations yet</p>
                                 ) : (
-                                    <div className="space-y-1 py-2">
+                                    <div className="space-y-0.5 pb-4">
                                         {conversations.map(conv => (
                                             <div
                                                 key={conv.id}
                                                 onClick={() => loadConversation(conv.id)}
-                                                className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${currentConversationId === conv.id
-                                                    ? 'bg-gray-700 text-white'
-                                                    : 'text-gray-400 hover:bg-gray-700/50 hover:text-gray-200'
+                                                className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 ${currentConversationId === conv.id
+                                                    ? 'bg-zinc-800/80 text-zinc-100 shadow-sm border border-zinc-700/50'
+                                                    : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 border border-transparent'
                                                     }`}
                                             >
-                                                <MessageSquare size={14} className="shrink-0" />
+                                                <MessageSquare size={14} className={currentConversationId === conv.id ? 'text-blue-400' : 'text-zinc-500 group-hover:text-zinc-400'} />
                                                 {editingConversationId === conv.id ? (
                                                     <input
                                                         type="text"
@@ -568,27 +637,27 @@ export default function DashboardPage() {
                                                         }}
                                                         onClick={(e) => e.stopPropagation()}
                                                         autoFocus
-                                                        className="flex-1 bg-gray-600 text-white text-sm px-1 py-0.5 rounded border border-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                        className="flex-1 bg-zinc-950 text-zinc-100 text-sm px-2 py-1 rounded-md border border-zinc-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                                     />
                                                 ) : (
-                                                    <span className="flex-1 text-sm truncate">{conv.title}</span>
+                                                    <span className="flex-1 text-sm truncate font-medium">{conv.title}</span>
                                                 )}
                                                 {/* Actions - show on hover */}
-                                                <div className="hidden group-hover:flex items-center gap-1">
+                                                <div className="hidden group-hover:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             setEditingConversationId(conv.id);
                                                             setEditingTitle(conv.title);
                                                         }}
-                                                        className="p-1 text-gray-400 hover:text-blue-400 transition-colors"
+                                                        className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-zinc-700/50 rounded-md transition-all"
                                                         title="Rename"
                                                     >
                                                         <Edit3 size={12} />
                                                     </button>
                                                     <button
                                                         onClick={(e) => handleDeleteConversation(conv.id, e)}
-                                                        className="p-1 text-gray-400 hover:text-red-400 transition-colors"
+                                                        className="p-1.5 text-zinc-400 hover:text-red-400 hover:bg-zinc-700/50 rounded-md transition-all"
                                                         title="Delete"
                                                     >
                                                         <Trash2 size={12} />
@@ -605,13 +674,13 @@ export default function DashboardPage() {
 
                 {/* Admin Sidebar - Only for Admin */}
                 {isAdmin && (
-                    <aside className="w-96 bg-gray-800 border-r border-gray-700 p-6 flex flex-col gap-6 overflow-y-auto">
+                    <aside className="w-96 bg-zinc-900/60 backdrop-blur-md border-r border-zinc-800/50 p-6 flex flex-col gap-6 overflow-y-auto">
                         {/* Group Selection */}
                         <div>
-                            <h3 className="text-sm font-semibold text-gray-400 uppercase mb-3">Select Group/Vehicle</h3>
+                            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Select Group/Vehicle</h3>
                             <div className="flex gap-2 mb-2">
                                 <select
-                                    className="flex-1 p-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="flex-1 p-2.5 bg-zinc-800 border border-zinc-700/50 rounded-lg text-zinc-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all text-sm"
                                     value={selectedGroupId || ''}
                                     onChange={(e) => setSelectedGroupId(Number(e.target.value))}
                                 >
@@ -622,34 +691,34 @@ export default function DashboardPage() {
                                 </select>
                                 <button
                                     onClick={() => setIsCreatingGroup(!isCreatingGroup)}
-                                    className="p-2 bg-gray-700 hover:bg-gray-600 rounded-md text-gray-300 transition-colors"
+                                    className="p-2.5 bg-zinc-800 border border-zinc-700/50 hover:bg-zinc-700 hover:border-zinc-600 rounded-lg text-zinc-300 transition-all"
                                     title="Create New Group"
                                 >
-                                    <Plus size={20} />
+                                    <Plus size={18} />
                                 </button>
                             </div>
 
                             {isCreatingGroup && (
-                                <form onSubmit={handleCreateGroup} className="mt-2 p-3 bg-gray-700 rounded-md border border-gray-600">
+                                <form onSubmit={handleCreateGroup} className="mt-3 p-4 bg-zinc-800/80 rounded-xl border border-zinc-700/50 shadow-sm">
                                     <input
                                         type="text"
                                         value={newGroupName}
                                         onChange={(e) => setNewGroupName(e.target.value)}
                                         placeholder="New Group Name"
-                                        className="w-full p-2 mb-2 text-sm bg-gray-600 border border-gray-500 rounded-md text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full p-2 mb-3 text-sm bg-zinc-950 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
                                         autoFocus
                                     />
                                     <div className="flex justify-end gap-2">
                                         <button
                                             type="button"
                                             onClick={() => setIsCreatingGroup(false)}
-                                            className="px-2 py-1 text-xs text-gray-400 hover:text-gray-200"
+                                            className="px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
                                         >
                                             Cancel
                                         </button>
                                         <button
                                             type="submit"
-                                            className="px-2 py-1 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                                            className="px-3 py-1.5 text-xs font-medium bg-blue-600/90 text-white rounded-lg hover:bg-blue-600 shadow-sm shadow-blue-900/20 transition-all"
                                         >
                                             Create
                                         </button>
@@ -660,12 +729,12 @@ export default function DashboardPage() {
 
                         {/* Document Upload */}
                         <div>
-                            <h3 className="text-sm font-semibold text-gray-400 uppercase mb-3">Upload Documents</h3>
+                            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Upload Documents</h3>
 
                             <input
                                 ref={fileInputRef}
                                 type="file"
-                                accept=".pdf"
+                                accept=".pdf,.ppt,.pptx"
                                 multiple
                                 onChange={handleFilesSelected}
                                 className="hidden"
@@ -673,40 +742,40 @@ export default function DashboardPage() {
                             />
                             <label
                                 htmlFor="file-upload"
-                                className={`flex items-center justify-center gap-2 p-4 border-2 border-dashed border-gray-600 rounded-lg cursor-pointer hover:border-blue-500 hover:bg-gray-700/50 transition-colors ${!selectedGroupId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                className={`flex items-center justify-center gap-3 p-6 border-2 border-dashed border-zinc-700 rounded-xl cursor-pointer hover:border-blue-500/50 hover:bg-zinc-800/50 bg-zinc-800/20 transition-all ${!selectedGroupId ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
-                                <Upload size={20} className="text-gray-400" />
-                                <span className="text-sm text-gray-400">Click to select PDFs</span>
+                                <Upload size={22} className="text-zinc-400" />
+                                <span className="text-sm font-medium text-zinc-400">Select PDFs or Presentations</span>
                             </label>
 
                             {uploadQueue.length > 0 && (
-                                <div className="mt-4 space-y-2">
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-xs text-gray-400">{uploadQueue.length} file(s)</span>
+                                <div className="mt-5 space-y-3">
+                                    <div className="flex justify-between items-center px-1">
+                                        <span className="text-xs font-medium text-zinc-500">{uploadQueue.length} file(s) in queue</span>
                                         {hasCompletedUploads && (
-                                            <button onClick={handleClearCompleted} className="text-xs text-gray-500 hover:text-gray-300">
+                                            <button onClick={handleClearCompleted} className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors">
                                                 Clear completed
                                             </button>
                                         )}
                                     </div>
 
-                                    <div className="max-h-64 overflow-y-auto space-y-2">
+                                    <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
                                         {uploadQueue.map(f => (
-                                            <div key={f.id} className="bg-gray-700 rounded-md p-2 border border-gray-600">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                            <div key={f.id} className="bg-zinc-800/80 rounded-xl p-3 border border-zinc-700/50 shadow-sm group">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
                                                         {getStatusIcon(f.status)}
-                                                        <span className="text-xs text-gray-300 truncate">{f.file.name}</span>
+                                                        <span className="text-xs font-medium text-zinc-300 truncate">{f.file.name}</span>
                                                     </div>
-                                                    <div className="flex items-center gap-1">
-                                                        <span className="text-xs text-gray-500">{getStatusText(f.status)}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">{getStatusText(f.status)}</span>
                                                         {f.status === 'failed' && (
-                                                            <button onClick={() => handleRetry(f.id)} className="p-1 text-blue-400 hover:text-blue-300">
+                                                            <button onClick={() => handleRetry(f.id)} className="p-1 text-blue-400 hover:text-blue-300 transition-colors opacity-0 group-hover:opacity-100">
                                                                 <RefreshCw size={12} />
                                                             </button>
                                                         )}
                                                         {(f.status === 'pending' || f.status === 'failed' || f.status === 'done') && (
-                                                            <button onClick={() => handleRemoveFromQueue(f.id)} className="p-1 text-gray-500 hover:text-red-400">
+                                                            <button onClick={() => handleRemoveFromQueue(f.id)} className="p-1 text-zinc-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
                                                                 <X size={12} />
                                                             </button>
                                                         )}
@@ -714,16 +783,16 @@ export default function DashboardPage() {
                                                 </div>
 
                                                 {(f.status === 'uploading' || f.status === 'processing') && (
-                                                    <div className="mt-2 h-1.5 bg-gray-600 rounded-full overflow-hidden">
+                                                    <div className="mt-3 h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
                                                         <div
-                                                            className={`h-full transition-all duration-300 ${f.status === 'processing' ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                                                            className={`h-full transition-all duration-300 rounded-full ${f.status === 'processing' ? 'bg-yellow-500/80' : 'bg-blue-500/80'}`}
                                                             style={{ width: `${f.progress}%` }}
                                                         />
                                                     </div>
                                                 )}
 
                                                 {f.error && (
-                                                    <p className="mt-1 text-xs text-red-400">{f.error}</p>
+                                                    <p className="mt-2 text-[11px] text-red-400/90 font-medium bg-red-400/10 p-1.5 rounded-lg border border-red-400/20">{f.error}</p>
                                                 )}
                                             </div>
                                         ))}
@@ -733,9 +802,9 @@ export default function DashboardPage() {
                                         <button
                                             onClick={handleUploadAll}
                                             disabled={!selectedGroupId}
-                                            className="w-full mt-2 flex items-center justify-center gap-2 bg-blue-600 text-white p-2 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                                            className="w-full mt-2 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-zinc-900 font-semibold p-2.5 rounded-xl disabled:opacity-50 transition-all shadow-sm"
                                         >
-                                            <Upload size={16} /> Upload All ({uploadQueue.filter(f => f.status === 'pending').length})
+                                            <Upload size={16} className="text-zinc-600" /> Start Upload ({uploadQueue.filter(f => f.status === 'pending').length})
                                         </button>
                                     )}
                                 </div>
@@ -745,12 +814,12 @@ export default function DashboardPage() {
                 )}
 
                 {/* Chat Area */}
-                <section className="flex-1 flex flex-col bg-gray-900">
+                <section className="flex-1 flex flex-col bg-transparent relative z-0">
                     {!isAdmin && hasMultipleGroups && (
-                        <div className="p-4 bg-gray-800 border-b border-gray-700">
-                            <label className="text-sm text-gray-400 mr-2">Query from:</label>
+                        <div className="p-3 bg-zinc-900/60 backdrop-blur-sm border-b border-zinc-800/50 flex items-center justify-center">
+                            <label className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mr-3">Query from</label>
                             <select
-                                className="p-2 bg-gray-700 border border-gray-600 rounded-md text-white"
+                                className="p-1.5 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 text-sm focus:ring-1 focus:ring-blue-500/50"
                                 value={selectedGroupId || ''}
                                 onChange={(e) => setSelectedGroupId(Number(e.target.value))}
                             >
@@ -761,11 +830,14 @@ export default function DashboardPage() {
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                    <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth">
                         {messages.length === 0 && !isQuerying && (
-                            <div className="text-center text-gray-500 mt-20">
-                                <FileText size={48} className="mx-auto mb-4 opacity-50" />
-                                <p>
+                            <div className="text-center text-zinc-500 mt-32 flex flex-col items-center">
+                                <div className="bg-zinc-800/50 p-6 rounded-3xl border border-zinc-700/50 shadow-sm mb-6">
+                                    <FileText size={48} className="text-zinc-600" />
+                                </div>
+                                <h2 className="text-lg font-medium text-zinc-300 mb-2">Welcome to RAG AI</h2>
+                                <p className="text-sm">
                                     {groups.length === 0
                                         ? "You are not assigned to any group yet. Please contact an admin."
                                         : "Start asking questions about the vehicle documents."}
@@ -774,10 +846,14 @@ export default function DashboardPage() {
                         )}
 
                         {messages.map((msg, idx) => (
-                            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-3xl p-4 rounded-lg ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-200'}`}>
+                            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                                <div className={`relative max-w-3xl p-5 rounded-2xl ${msg.role === 'user'
+                                    ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-900/20 rounded-br-sm'
+                                    : 'bg-zinc-800/40 backdrop-blur-sm border border-zinc-700/50 text-zinc-200 shadow-sm rounded-bl-sm'
+                                    }`}>
+
                                     {msg.role === 'user' ? (
-                                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                                        <p className="whitespace-pre-wrap leading-relaxed text-sm">{msg.content}</p>
                                     ) : (
                                         <div className="markdown-content">
                                             <ReactMarkdown
@@ -790,16 +866,17 @@ export default function DashboardPage() {
                                     )}
 
                                     {msg.sources && msg.sources.length > 0 && (
-                                        <div className="mt-4 pt-4 border-t border-gray-600 text-xs">
-                                            <p className="font-semibold text-gray-400 mb-2">Sources (click to view):</p>
+                                        <div className="mt-5 pt-4 border-t border-zinc-700/50">
+                                            <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">Sources</p>
                                             <div className="flex flex-wrap gap-2">
                                                 {msg.sources.map((src, i) => (
                                                     <button
                                                         key={i}
                                                         onClick={() => setSelectedSource(src)}
-                                                        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 hover:text-white transition-colors"
+                                                        className="px-3 py-1.5 bg-zinc-900/60 border border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800 rounded-full text-xs text-zinc-400 hover:text-zinc-200 transition-all shadow-sm flex items-center gap-1.5 group"
                                                     >
-                                                        📄 {src.filename || `Page ${src.page_number}`}
+                                                        <FileText size={12} className="text-zinc-500 group-hover:text-zinc-400" />
+                                                        <span className="truncate max-w-[150px]">{src.filename || `Page ${src.page_number}`}</span>
                                                     </button>
                                                 ))}
                                             </div>
@@ -811,97 +888,104 @@ export default function DashboardPage() {
 
                         {/* Typing Indicator */}
                         {isQuerying && (
-                            <div className="flex justify-start">
-                                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 flex items-center gap-2">
-                                    <Loader2 size={16} className="animate-spin text-blue-400" />
-                                    <span className="text-gray-400 text-sm">Thinking...</span>
+                            <div className="flex justify-start animate-in fade-in duration-300">
+                                <div className="bg-zinc-800/40 backdrop-blur-sm border border-zinc-700/50 rounded-2xl p-4 flex items-center gap-3 rounded-bl-sm">
+                                    <div className="flex gap-1.5">
+                                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce"></div>
+                                    </div>
+                                    <span className="text-zinc-500 text-sm font-medium">Thinking...</span>
                                 </div>
                             </div>
                         )}
 
-                        <div ref={messagesEndRef} />
+                        <div ref={messagesEndRef} className="h-4" />
                     </div>
 
-                    {/* Input Area */}
-                    <div className="p-4 bg-gray-800 border-t border-gray-700">
-                        {/* Model Selector */}
-                        <div className="flex items-center gap-2 mb-3 max-w-4xl mx-auto">
-                            <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                                {selectedModel.provider === 'nvidia' ? (
-                                    <Cloud size={14} className="text-green-400" />
-                                ) : (
-                                    <Cpu size={14} className="text-blue-400" />
-                                )}
-                                <span>Model:</span>
-                            </div>
-                            <select
-                                value={selectedModel.provider && selectedModel.name ? `${selectedModel.provider}:${selectedModel.name}` : 'default'}
-                                onChange={(e) => handleModelChange(e.target.value)}
-                                className="flex-1 max-w-xs text-xs bg-gray-700 border border-gray-600 rounded-md px-2 py-1.5 text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                            >
-                                <option value="default">Server Default</option>
-                                {ollamaModels.length > 0 && (
-                                    <optgroup label="⚡ Local (Ollama)">
-                                        {ollamaModels.map(m => (
-                                            <option key={m.name} value={`ollama:${m.name}`}>
-                                                {m.label} ({m.size})
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {cloudModels.length > 0 && (
-                                    <optgroup label="☁️ Cloud (NVIDIA)">
-                                        {cloudModels.map(m => (
-                                            <option key={m.name} value={`nvidia:${m.name}`}>
-                                                {m.label}
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                            </select>
-                        </div>
+                    {/* Input Area - Floating Pill Design */}
+                    <div className="p-4 md:p-6 bg-gradient-to-t from-zinc-950 via-zinc-950/90 to-transparent pb-6">
+                        <div className="max-w-4xl mx-auto rounded-2xl bg-zinc-900/80 backdrop-blur-xl border border-zinc-700/50 shadow-xl overflow-hidden shadow-black/20">
 
-                        <form onSubmit={handleSearch} className="flex gap-4 max-w-4xl mx-auto">
-                            <input
-                                type="text"
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                placeholder={groups.length === 0 ? "No group assigned..." : "Ask a question about the vehicle documents..."}
-                                disabled={groups.length === 0 || isQuerying}
-                                className="flex-1 p-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400 disabled:bg-gray-800 disabled:text-gray-500"
-                            />
-                            <button
-                                type="submit"
-                                disabled={!query.trim() || !selectedGroupId || groups.length === 0 || isQuerying}
-                                className="bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                            >
-                                {isQuerying ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-                            </button>
-                        </form>
+                            {/* Model Selector Bar */}
+                            <div className="flex items-center gap-2 px-4 py-2 bg-zinc-800/30 border-b border-zinc-700/50">
+                                <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                                    {selectedModel.provider === 'nvidia' ? (
+                                        <Cloud size={13} className="text-emerald-400" />
+                                    ) : (
+                                        <Cpu size={13} className="text-blue-400" />
+                                    )}
+                                    <span>Model</span>
+                                </div>
+                                <select
+                                    value={selectedModel.provider && selectedModel.name ? `${selectedModel.provider}:${selectedModel.name}` : 'default'}
+                                    onChange={(e) => handleModelChange(e.target.value)}
+                                    className="max-w-[200px] text-xs bg-transparent text-zinc-300 font-medium focus:outline-none cursor-pointer hover:text-white transition-colors border-none p-0 focus:ring-0"
+                                >
+                                    <option value="default" className="bg-zinc-900 text-zinc-100">Server Default</option>
+                                    {ollamaModels.length > 0 && (
+                                        <optgroup label="⚡ Local (Ollama)" className="bg-zinc-900 text-zinc-500 font-semibold">
+                                            {ollamaModels.map(m => (
+                                                <option key={m.name} value={`ollama:${m.name}`} className="text-zinc-100 font-medium">
+                                                    {m.label} ({m.size})
+                                                </option>
+                                            ))}
+                                        </optgroup>
+                                    )}
+                                    {cloudModels.length > 0 && (
+                                        <optgroup label="☁️ Cloud (NVIDIA)" className="bg-zinc-900 text-zinc-500 font-semibold">
+                                            {cloudModels.map(m => (
+                                                <option key={m.name} value={`nvidia:${m.name}`} className="text-zinc-100 font-medium">
+                                                    {m.label}
+                                                </option>
+                                            ))}
+                                        </optgroup>
+                                    )}
+                                </select>
+                            </div>
+
+                            <form onSubmit={handleSearch} className="flex gap-3 p-2 pl-4">
+                                <input
+                                    type="text"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    placeholder={groups.length === 0 ? "No group assigned..." : "Ask a question about the vehicle documents..."}
+                                    disabled={groups.length === 0 || isQuerying}
+                                    className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-zinc-100 placeholder-zinc-500 disabled:text-zinc-600 font-medium text-[15px] pt-1"
+                                />
+                                <button
+                                    type="submit"
+                                    disabled={!query.trim() || !selectedGroupId || groups.length === 0 || isQuerying}
+                                    className="bg-zinc-800 text-white p-3 rounded-xl hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all shadow-sm group border border-zinc-700/50"
+                                >
+                                    {isQuerying ? <Loader2 size={18} className="animate-spin text-blue-400" /> : <Send size={18} className="text-blue-400 group-hover:scale-110 transition-transform" />}
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </section>
             </main>
 
             {/* Source Citation Modal */}
             {selectedSource && (
-                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-                    <div className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col border border-gray-700">
-                        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+                    <div className="bg-zinc-900 rounded-2xl shadow-2xl shadow-black max-w-2xl w-full max-h-[80vh] flex flex-col border border-zinc-700/60 overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between p-5 border-b border-zinc-800 bg-zinc-900/50">
                             <div>
-                                <h3 className="font-semibold text-white">{selectedSource.filename || 'Source Citation'}</h3>
-                                <p className="text-sm text-gray-400">Page {selectedSource.page_number}</p>
+                                <h3 className="font-semibold text-zinc-100">{selectedSource.filename || 'Source Citation'}</h3>
+                                <p className="text-xs font-medium text-zinc-500 mt-0.5">Page {selectedSource.page_number}</p>
                             </div>
-                            <button onClick={() => setSelectedSource(null)} className="text-gray-400 hover:text-white transition-colors">
+                            <button onClick={() => setSelectedSource(null)} className="p-2 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded-full transition-all">
                                 <X size={20} />
                             </button>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-4">
-                            <div className="bg-gray-900 rounded-lg p-4 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                        <div className="flex-1 overflow-y-auto p-6 bg-zinc-950/50">
+                            <div className="bg-zinc-900/80 rounded-xl p-5 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap border border-zinc-800 shadow-inner font-serif">
                                 {selectedSource.full_text}
                             </div>
                         </div>
-                        <div className="p-4 border-t border-gray-700 text-xs text-gray-500">
-                            {selectedSource.file_path && <p>File: {selectedSource.file_path}</p>}
+                        <div className="p-4 border-t border-zinc-800 bg-zinc-900/80 text-[11px] font-mono text-zinc-600 truncate">
+                            {selectedSource.file_path && <p>Path: {selectedSource.file_path}</p>}
                         </div>
                     </div>
                 </div>

@@ -1,0 +1,121 @@
+=== SYSTEM PROMPT ===
+You are a senior vehicle test engineer assistant specializing in technical documentation analysis.
+
+## YOUR EXPERTISE:
+- Vehicle performance testing (brake, cooling, steering, acceleration)
+- Engine specifications and diagnostics
+- Chassis and component details
+- Test procedures and methodologies
+- Technical measurements and specifications
+
+## CRITICAL RULES - YOU MUST FOLLOW THESE:
+1. Answer ONLY using information from the CONTEXT provided below. Do NOT use any external or pre-trained knowledge.
+2. If the context does not contain the answer, respond ONLY with: "This information is not available in the uploaded documents."
+3. NEVER fabricate, invent, or hallucinate data, names, values, standards, or references.
+4. Every claim MUST be directly traceable to the context. Cite sources as [Page X, Document Name].
+5. Reproduce data exactly as it appears in the context — do not paraphrase numbers, units, or test results.
+6. If a table is present in the context, reproduce it faithfully in Markdown format.
+
+## FORMATTING RULES:
+- Include specific technical values with units (e.g., "825 Nm @ 1200-1600 rpm")
+- Reference test conditions (laden/unladen, temperature, speed)
+- Format tables properly when presenting specifications
+- Cite sources: [Page X, Document Name]
+
+=== USER PROMPT ===
+## CONTEXT (Retrieved from test reports):
+Source [BIN1025_4010-E694 CNG VECV Questions-AVL_Feedback--1.1-220502.pdf, Page 4]:
+### Table 2 (Page 4)
+| Please specify the value of AVL
+benchmark for Swirl Number |  |
+| --- | --- |
+|  |  |
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 8]:
+Vehicle Development Center Test Report.: ETR/Pro 20.15/Bus Performance/_02_24_14 Test Report Date:14.05.2024 Page 8 of 17
+
+Source [BIN1025_4010-E694 CNG VECV Questions-AVL_Feedback--1.1-220502.pdf, Page 4]:
+### Table 2 (Page 4)
+| Please specify the value of AVL
+benchmark for Swirl Number |  |
+| --- | --- |
+|  |  |
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 17]:
+Vehicle Development Center Test Report.: ETR/Pro 20.15/Bus Performance/_02_24_14 Test Report Date:14.05.2024 Page 17 of 17
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 8]:
+Vehicle Development Center Test Report.: ETR/Pro 20.15/Bus Performance/_02_24_14 Test Report Date:14.05.2024 Page 8 of 17
+
+Source [BIN1025_4010-DAM3245-E694_CNG-Cylinderhead_TMF_analysis--2.2-220422.pdf, Page 36]:
+Heat Transfer Boundary Conditions 150kW@2400rpm THERMAL FIELD BOUNDARY CONDITIONS Rated Speed 150kW@2400rpm WF 233 l/min TWI 95°C WATER/GLYCOL=50/50% Gas side /3034/00/01-CFD2FEM_2400rpm_rated_150kW Water side /3006/00/02-CFD2FEM_4009_distributedWT_rated HTC [W/m²K] – Convective Heat Transfer-Coefficient T Fluid [°C] – Near Wall Fluid Temperature DAM AVL List GmbH (Headquarters) Confidential -Approved Dr. Christopher Huber BIN1025 -4010 / DAM3245 -E694 CNG Cylinderhead TMF Analysis -2.2 -22.04.2022 Page 3 7 / 74
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 9]:
+Vehicle Development Center Test Report.: ETR/Pro 20.15/Bus Performance/_02_24_14 Test Report Date:14.05.2024 Page 9 of 17
+
+Source [BIN1025_4010-DAM3245-E694_CNG-Cylinderhead_TMF_analysis--2.2-220422.pdf, Page 36]:
+Heat Transfer Boundary Conditions 150kW@2400rpm THERMAL FIELD BOUNDARY CONDITIONS Rated Speed 150kW@2400rpm WF 233 l/min TWI 95°C WATER/GLYCOL=50/50% Gas side /3034/00/01-CFD2FEM_2400rpm_rated_150kW Water side /3006/00/02-CFD2FEM_4009_distributedWT_rated HTC [W/m²K] – Convective Heat Transfer-Coefficient T Fluid [°C] – Near Wall Fluid Temperature DAM AVL List GmbH (Headquarters) Confidential -Approved Dr. Christopher Huber BIN1025 -4010 / DAM3245 -E694 CNG Cylinderhead TMF Analysis -2.2 -22.04.2022 Page 3 7 / 74
+
+Source [MDEP_Exhaust_ER-512326.pdf, Page 44]:
+C79 715 0.1 1 7.11 126 113.32 C80 715 0.1 1 7.15 480 87.15 C81 715 0.1 2 7.06 8757 63.86 C82 715 0.1 2 7.1 140365 44.19 C83 715 0.1 5 7.07 1260867 38.21 + test run-out
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 9]:
+Vehicle Development Center Test Report.: ETR/Pro 20.15/Bus Performance/_02_24_14 Test Report Date:14.05.2024 Page 9 of 17
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 17]:
+Vehicle Development Center Test Report.: ETR/Pro 20.15/Bus Performance/_02_24_14 Test Report Date:14.05.2024 Page 17 of 17
+
+Source [MDEP_Exhaust_ER-512326.pdf, Page 44]:
+C79 715 0.1 1 7.11 126 113.32 C80 715 0.1 1 7.15 480 87.15 C81 715 0.1 2 7.06 8757 63.86 C82 715 0.1 2 7.1 140365 44.19 C83 715 0.1 5 7.07 1260867 38.21 + test run-out
+
+Source [BIN1025_4010-DAM3245-E694_CNG-Cylinderhead_TMF_analysis--3.5-220506.pdf, Page 38]:
+Heat Transfer Boundary Conditions 150kW@2400rpm THERMAL FIELD BOUNDARY CONDITIONS Rated Speed 150kW@2400rpm WF 233 l/min TWI 95°C WATER/GLYCOL=50/50% Gas side /3034/00/01-CFD2FEM_2400rpm_rated_150kW Water side /3006/00/02-CFD2FEM_4009_distributedWT_rated HTC [W/m²K] – Convective Heat Transfer-Coefficient T Fluid [°C] – Near Wall Fluid Temperature DAM AVL List GmbH (Headquarters) Confidential -Approved Dr. Christopher Huber BIN1025 -4010 / DAM3245 -E694 CNG Cylinderhead TMF Analysis -3.5 -06.05.2022 Page 3 9 / 82
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 12]:
+### Table 1 (Page 12)
+|  | Vehicle Development Center
+Test Report | Test Report.: ETR/Pro 20.15/Bus
+Performance/_02_24_14
+Date:14.05.2024 |
+| --- | --- | --- |
+
+Source [BIN1025_4010-DAM3245-E694_CNG-Cylinderhead_TMF_analysis--3.5-220506.pdf, Page 38]:
+Heat Transfer Boundary Conditions 150kW@2400rpm THERMAL FIELD BOUNDARY CONDITIONS Rated Speed 150kW@2400rpm WF 233 l/min TWI 95°C WATER/GLYCOL=50/50% Gas side /3034/00/01-CFD2FEM_2400rpm_rated_150kW Water side /3006/00/02-CFD2FEM_4009_distributedWT_rated HTC [W/m²K] – Convective Heat Transfer-Coefficient T Fluid [°C] – Near Wall Fluid Temperature DAM AVL List GmbH (Headquarters) Confidential -Approved Dr. Christopher Huber BIN1025 -4010 / DAM3245 -E694 CNG Cylinderhead TMF Analysis -3.5 -06.05.2022 Page 3 9 / 82
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 3]:
+### Table 1 (Page 3)
+|  | Vehicle Development Center
+Test Report | Test Report.: ETR/Pro 20.15/Bus
+Performance/_02_24_14
+Date:14.05.2024 |
+| --- | --- | --- |
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 13]:
+### Table 1 (Page 13)
+|  | Vehicle Development Center
+Test Report | Test Report.: ETR/Pro 20.15/Bus
+Performance/_02_24_14
+Date:14.05.2024 |
+| --- | --- | --- |
+
+Source [BIN1025_4010-DAM3245-E694_CNG-Cylinderhead_TMF_analysis--2.2-220422.pdf, Page 66]:
+Analysis results Life time estimation: Number of cycles to failure, GJL-250 3.97 A (9247) [-] Cycle limit = 6000 For medium duty truck 4.08 EX IN D Log10(6000) = 3.78 (11965) 3.22 B EX IN (1645) 3.93 C (8431) [-] Results are below the cycle limit of 6000, 3.51 E therefore not acceptable. (3248) Node Location Tmax Tmin dTemp dS dEVCUM dWp NfATMX log10 (NfATMX) 3.31 F ID [-] [°C] [°C] [°C] [MPa] [-] [mJ/mm^3] [-] [-] (2024) 414376 EX-IN (A) 363 61 302 335 4.85E-04 8.81E-02 9247 3.97 651259 EX-EX (B) 400 63 337 373 8.80E-04 1.66E-01 1645 3.22 1179630 EX-IN (C) 377 57 320 323 5.16E-04 8.65E-02 8431 3.93 278410 IN-IN (D) 304 50 254 345 4.89E-04 8.68E-02 11965 4.08 1157128 SP-CH (E) 359 58 300 337 9.07E-04 1.51E-01 3248 3.51 1151306 SP-CH (F) 378 58 320 342 1.07E-03 1.77E-01 2024 3.31 DAM AVL List GmbH (Headquarters) Confidential -Approved Dr. Christopher Huber BIN1025 -4010 / DAM3245 -E694 CNG Cylinderhead TMF Analysis -2.2 -22.04.2022 Page 6 7 / 74
+
+Source [ETR_02_24_14 Pro 20.15 Consolidate Performance Report.pdf, Page 1]:
+### Table 1 (Page 1)
+|  | Vehicle Development Center
+Test Report | Test Report.: ETR/Pro 20.15/Bus
+Performance/_02_24_14
+Date:14.05.2024 |
+| --- | --- | --- |
+
+Source [BIN1025_4010-DAM3245-E694_CNG-Cylinderhead_TMF_analysis--2.2-220422.pdf, Page 66]:
+Analysis results Life time estimation: Number of cycles to failure, GJL-250 3.97 A (9247) [-] Cycle limit = 6000 For medium duty truck 4.08 EX IN D Log10(6000) = 3.78 (11965) 3.22 B EX IN (1645) 3.93 C (8431) [-] Results are below the cycle limit of 6000, 3.51 E therefore not acceptable. (3248) Node Location Tmax Tmin dTemp dS dEVCUM dWp NfATMX log10 (NfATMX) 3.31 F ID [-] [°C] [°C] [°C] [MPa] [-] [mJ/mm^3] [-] [-] (2024) 414376 EX-IN (A) 363 61 302 335 4.85E-04 8.81E-02 9247 3.97 651259 EX-EX (B) 400 63 337 373 8.80E-04 1.66E-01 1645 3.22 1179630 EX-IN (C) 377 57 320 323 5.16E-04 8.65E-02 8431 3.93 278410 IN-IN (D) 304 50 254 345 4.89E-04 8.68E-02 11965 4.08 1157128 SP-CH (E) 359 58 300 337 9.07E-04 1.51E-01 3248 3.51 1151306 SP-CH (F) 378 58 320 342 1.07E-03 1.77E-01 2024 3.31 DAM AVL List GmbH (Headquarters) Confidential -Approved Dr. Christopher Huber BIN1025 -4010 / DAM3245 -E694 CNG Cylinderhead TMF Analysis -2.2 -22.04.2022 Page 6 7 / 74
+
+
+
+## CONVERSATION HISTORY:
+(New conversation)
+
+## USER QUESTION:
+what is the performance test of Pro 3012?

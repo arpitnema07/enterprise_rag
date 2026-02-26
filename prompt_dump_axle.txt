@@ -1,0 +1,105 @@
+=== SYSTEM PROMPT ===
+You are a senior vehicle test engineer assistant specializing in technical documentation analysis.
+
+## YOUR EXPERTISE:
+- Vehicle performance testing (brake, cooling, steering, acceleration)
+- Engine specifications and diagnostics
+- Chassis and component details
+- Test procedures and methodologies
+- Technical measurements and specifications
+
+## CRITICAL RULES - YOU MUST FOLLOW THESE:
+1. Answer ONLY using information from the CONTEXT provided below. Do NOT use any external or pre-trained knowledge.
+2. If the context does not contain the answer, respond ONLY with: "This information is not available in the uploaded documents."
+3. NEVER fabricate, invent, or hallucinate data, names, values, standards, or references.
+4. Every claim MUST be directly traceable to the context. Cite sources as [Page X, Document Name].
+5. Reproduce data exactly as it appears in the context — do not paraphrase numbers, units, or test results.
+6. If a table is present in the context, reproduce it faithfully in Markdown format.
+
+## FORMATTING RULES:
+- Include specific technical values with units (e.g., "825 Nm @ 1200-1600 rpm")
+- Reference test conditions (laden/unladen, temperature, speed)
+- Format tables properly when presenting specifications
+- Cite sources: [Page X, Document Name]
+
+=== USER PROMPT ===
+## CONTEXT (Retrieved from test reports):
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 1]:
+Hub Reduction Tandem :: CAE Load Cases Hub Reduction Tandem CAE Load Cases ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 1 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 56]:
+### Table 1 (Page 56)
+| M16 | M10 |
+| --- | --- |
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 1]:
+Hub Reduction Tandem :: CAE Load Cases Hub Reduction Tandem CAE Load Cases ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 1 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 56]:
+### Table 1 (Page 56)
+| M16 | M10 |
+| --- | --- |
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 33]:
+Hub Reduction Tandem :: CAE Load Cases Results R2 Axle : ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 40 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 16]:
+Hub Reduction Tandem :: CAE Load Cases Stress Results (Input Shaft Iteration1) Life –10000 Cycles ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 16 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 41]:
+Hub Reduction Tandem :: CAE Load Cases Results R2 Axle : ExecutedBy :: Hemant Nishad Date : 07thJan , 2020 40 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 33]:
+Hub Reduction Tandem :: CAE Load Cases Results R2 Axle : ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 40 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 41]:
+Hub Reduction Tandem :: CAE Load Cases Results R2 Axle : ExecutedBy :: Hemant Nishad Date : 07thJan , 2020 40 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 16]:
+Hub Reduction Tandem :: CAE Load Cases Stress Results (Input Shaft Iteration1) Life –10000 Cycles ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 16 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 56]:
+### Table 2 (Page 56)
+| 108333 | 125000 | 40000 | 53333 |
+| --- | --- | --- | --- |
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 32]:
+Hub Reduction Tandem :: CAE Load Cases Loads R2 Carrier : ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 40 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 56]:
+### Table 2 (Page 56)
+| 108333 | 125000 | 40000 | 53333 |
+| --- | --- | --- | --- |
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 06Dec19.pdf, Page 32]:
+Hub Reduction Tandem :: CAE Load Cases Loads R2 Carrier : ExecutedBy :: Hemant Nishad Date : 06th Dec , 2019 40 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 1]:
+Hub Reduction Tandem :: CAE Load Cases Hub Reduction Tandem File Path - D:\D_Data\IT32498 d\Hemant Projects\Current\305DH_HRT CAE Load Cases ExecutedBy :: Hemant Nishad Date : 07thJan , 2020 1 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 1]:
+Hub Reduction Tandem :: CAE Load Cases Hub Reduction Tandem File Path - D:\D_Data\IT32498 d\Hemant Projects\Current\305DH_HRT CAE Load Cases ExecutedBy :: Hemant Nishad Date : 07thJan , 2020 1 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 65]:
+### Table 1 (Page 65)
+| M16 | M10 |
+| --- | --- |
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 65]:
+### Table 1 (Page 65)
+| M16 | M10 |
+| --- | --- |
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 73]:
+Hub Reduction Tandem :: CAE Load Cases Results: Forks Analysis Stiffness is balanced in both forks, hence it in safe in stiffness ExecutedBy :: Hemant Nishad Date : 07thJan , 2020 72 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+Source [Hub Reduction Tandem Axle Analysis Final report with LCs 07Jan2020.pdf, Page 73]:
+Hub Reduction Tandem :: CAE Load Cases Results: Forks Analysis Stiffness is balanced in both forks, hence it in safe in stiffness ExecutedBy :: Hemant Nishad Date : 07thJan , 2020 72 Reviewed By :: Suresh Kumar Issuing Aggregate: Driveline
+
+
+
+## CONVERSATION HISTORY:
+(New conversation)
+
+## USER QUESTION:
+Hub Reduction Tandem Axle Analysis Final report

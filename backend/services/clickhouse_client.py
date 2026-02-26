@@ -9,12 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 import clickhouse_connect
 
-# Configuration from environment
-CH_HOST = os.getenv("CLICKHOUSE_HOST", "localhost")
-CH_PORT = int(os.getenv("CLICKHOUSE_PORT", "8123"))
-CH_DATABASE = os.getenv("CLICKHOUSE_DB", "vecvrag")
-CH_USER = os.getenv("CLICKHOUSE_USER", "default")
-CH_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "")
+# Environment configurations are loaded dynamically in _get_client
 
 # Lazy-initialized client
 _client = None
@@ -24,14 +19,48 @@ def _get_client():
     """Get or create the ClickHouse client singleton."""
     global _client
     if _client is None:
+        ch_database = os.getenv("CLICKHOUSE_DB", "vecvrag")
         _client = clickhouse_connect.get_client(
-            host=CH_HOST,
-            port=CH_PORT,
-            database=CH_DATABASE,
-            username=CH_USER,
-            password=CH_PASSWORD,
+            host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            database=ch_database,
+            username=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", ""),
         )
+        # Store for reuse in ensure_table_exists
+        _client.vecvrag_db = ch_database
     return _client
+
+
+def ensure_table_exists():
+    """Ensure the events table exists in ClickHouse."""
+    client = _get_client()
+    query = """
+    CREATE TABLE IF NOT EXISTS events (
+        event_id UUID DEFAULT generateUUIDv4(),
+        timestamp DateTime64(3, 'UTC'),
+        event_type String,
+        level String,
+        trace_id String,
+        user_id Nullable(Int32),
+        user_email Nullable(String),
+        message String,
+        query Nullable(String),
+        response Nullable(String),
+        chunks_json Nullable(String),
+        latency_ms Nullable(Float64),
+        token_count Nullable(Int32),
+        status Nullable(String),
+        error_detail Nullable(String),
+        metadata_json Nullable(String),
+        model_provider Nullable(String),
+        model_name Nullable(String)
+    ) ENGINE = MergeTree()
+    ORDER BY (timestamp, event_type)
+    """
+    # Create DB if it doesn't exist
+    client.command(f"CREATE DATABASE IF NOT EXISTS {client.vecvrag_db}")
+    client.command(query)
 
 
 def insert_event(

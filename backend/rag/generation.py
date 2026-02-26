@@ -4,29 +4,102 @@ Supports Ollama and NVIDIA API endpoints with versioned prompts.
 """
 
 import os
+import logging
 import requests
 from typing import List, Dict, Any, Optional
 from langchain_community.llms import Ollama
 from .prompt_manager import prompt_manager
 from .conversation import format_history
 
-# Configuration
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia")  # "ollama" or "nvidia"
+logger = logging.getLogger(__name__)
 
-# Ollama Configuration
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")
+# Mutable runtime config
+_config_cache = None
+_ollama_llm_cache = None
 
-# NVIDIA Configuration
-NVIDIA_API_KEY = os.getenv(
-    "NVIDIA_API_KEY",
-    "",
-)
-NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k2-instruct")
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
-# Initialize Ollama LLM
-_ollama_llm = Ollama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL)
+
+def _get_config():
+    global _config_cache
+    if _config_cache is None:
+        _config_cache = {
+            "provider": os.getenv("LLM_PROVIDER", "nvidia"),
+            "ollama_model": os.getenv("OLLAMA_MODEL", ""),
+            "ollama_base_url": os.getenv("OLLAMA_BASE_URL", ""),
+            "nvidia_api_key": os.getenv("NVIDIA_API_KEY", ""),
+            "nvidia_model": os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k2-instruct"),
+        }
+    return _config_cache
+
+
+def _get_ollama_llm():
+    global _ollama_llm_cache
+    if _ollama_llm_cache is None:
+        cfg = _get_config()
+        _ollama_llm_cache = Ollama(
+            model=cfg["ollama_model"], base_url=cfg["ollama_base_url"]
+        )
+    return _ollama_llm_cache
+
+
+# Convenience accessors (read from mutable config)
+def _provider():
+    return _get_config()["provider"]
+
+
+def get_current_provider() -> Dict[str, str]:
+    """Get information about the current LLM provider."""
+    cfg = _get_config()
+    return {
+        "provider": cfg["provider"],
+        "model": cfg["nvidia_model"]
+        if cfg["provider"] == "nvidia"
+        else cfg["ollama_model"],
+        "endpoint": NVIDIA_API_URL
+        if cfg["provider"] == "nvidia"
+        else cfg["ollama_base_url"],
+        "ollama_model": cfg["ollama_model"],
+        "nvidia_model": cfg["nvidia_model"],
+        "ollama_base_url": cfg["ollama_base_url"],
+    }
+
+
+def update_provider(changes: Dict[str, str]) -> Dict[str, str]:
+    """
+    Update LLM provider configuration at runtime.
+
+    Args:
+        changes: Dict with any of: provider, ollama_model, nvidia_model, nvidia_api_key
+
+    Returns:
+        Updated provider info
+    """
+    global _ollama_llm_cache
+    cfg = _get_config()
+
+    allowed = {
+        "provider",
+        "ollama_model",
+        "nvidia_model",
+        "nvidia_api_key",
+        "ollama_base_url",
+    }
+    for key, value in changes.items():
+        if key in allowed and value is not None:
+            cfg[key] = value
+
+    # Reinitialize Ollama LLM if model or URL changed
+    if "ollama_model" in changes or "ollama_base_url" in changes:
+        _ollama_llm_cache = Ollama(
+            model=cfg["ollama_model"],
+            base_url=cfg["ollama_base_url"],
+        )
+
+    logger.info(
+        f"LLM config updated: provider={cfg['provider']}, model={get_current_provider()['model']}"
+    )
+    return get_current_provider()
 
 
 def _call_nvidia_api(
@@ -52,12 +125,14 @@ def _call_nvidia_api(
     """
     import time
 
-    if not NVIDIA_API_KEY:
-        raise ValueError("NVIDIA_API_KEY environment variable not set")
+    cfg = _get_config()
+
+    if not cfg["nvidia_api_key"]:
+        raise ValueError("NVIDIA_API_KEY not set")
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Authorization": f"Bearer {cfg['nvidia_api_key']}",
     }
 
     # Build messages with proper role separation
@@ -67,7 +142,7 @@ def _call_nvidia_api(
     messages.append({"role": "user", "content": prompt})
 
     payload = {
-        "model": model_name or NVIDIA_MODEL,
+        "model": model_name or cfg["nvidia_model"],
         "messages": messages,
         "temperature": 0.1,  # Low temperature for factual, grounded responses
         "max_tokens": 2048,
@@ -129,7 +204,8 @@ def _invoke_llm(
     Returns:
         Generated text response
     """
-    provider = model_provider or LLM_PROVIDER
+    cfg = _get_config()
+    provider = model_provider or cfg["provider"]
 
     if provider == "nvidia":
         return _call_nvidia_api(
@@ -138,13 +214,82 @@ def _invoke_llm(
     else:
         # For Ollama, use per-request model if specified
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        if model_name and model_name != OLLAMA_MODEL:
+        if model_name and model_name != cfg["ollama_model"]:
             # Create a temporary Ollama instance for the requested model
             from langchain_community.llms import Ollama as OllamaLLM
 
-            temp_llm = OllamaLLM(model=model_name, base_url=OLLAMA_BASE_URL)
+            temp_llm = OllamaLLM(model=model_name, base_url=cfg["ollama_base_url"])
             return temp_llm.invoke(full_prompt)
-        return _ollama_llm.invoke(full_prompt)
+        return _get_ollama_llm().invoke(full_prompt)
+
+
+def _invoke_llm_stream(
+    prompt: str,
+    system_prompt: str = None,
+    model_provider: str = None,
+    model_name: str = None,
+):
+    """Generator that yields LLM chunks."""
+    cfg = _get_config()
+    provider = model_provider or cfg["provider"]
+
+    if provider == "nvidia":
+        if not cfg["nvidia_api_key"]:
+            yield "Error: NVIDIA_API_KEY not set"
+            return
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {cfg['nvidia_api_key']}",
+        }
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            "model": model_name or cfg["nvidia_model"],
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 2048,
+            "stream": True,
+        }
+
+        try:
+            import json
+
+            response = requests.post(
+                NVIDIA_API_URL, headers=headers, json=payload, stream=True, verify=False
+            )
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if line:
+                    line_str = line.decode("utf-8")
+                    if line_str.startswith("data: ") and line_str != "data: [DONE]":
+                        data_str = line_str[6:]
+                        try:
+                            data = json.loads(data_str)
+                            if "choices" in data and len(data["choices"]) > 0:
+                                delta = data["choices"][0].get("delta", {})
+                                if "content" in delta:
+                                    yield delta["content"]
+                        except json.JSONDecodeError:
+                            pass
+        except Exception as e:
+            yield f"\n[NVIDIA API Error: {str(e)}]"
+
+    else:
+        # Ollama stream
+        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+        if model_name and model_name != cfg["ollama_model"]:
+            from langchain_community.llms import Ollama as OllamaLLM
+
+            temp_llm = OllamaLLM(model=model_name, base_url=cfg["ollama_base_url"])
+            for chunk in temp_llm.stream(full_prompt):
+                yield chunk
+        else:
+            for chunk in _get_ollama_llm().stream(full_prompt):
+                yield chunk
 
 
 def format_context(context_chunks: List[Dict[str, Any]]) -> str:
@@ -303,17 +448,3 @@ Context:
 Question: {query}
 """
     return _invoke_llm(prompt)
-
-
-def get_current_provider() -> Dict[str, str]:
-    """
-    Get information about the current LLM provider.
-
-    Returns:
-        Dict with provider info
-    """
-    return {
-        "provider": LLM_PROVIDER,
-        "model": NVIDIA_MODEL if LLM_PROVIDER == "nvidia" else OLLAMA_MODEL,
-        "endpoint": NVIDIA_API_URL if LLM_PROVIDER == "nvidia" else OLLAMA_BASE_URL,
-    }

@@ -45,7 +45,7 @@ export default function TracesPage() {
     // Fetch historical events
     const fetchEvents = () => {
         setLoading(true);
-        let url = '/traces?limit=100';
+        let url = '/admin/traces?limit=100';
         if (filterType) url += `&event_type=${filterType}`;
         if (filterLevel) url += `&level=${filterLevel}`;
         api.get(url).then(r => setEvents(r.data.events || r.data || [])).catch(console.error).finally(() => setLoading(false));
@@ -63,7 +63,7 @@ export default function TracesPage() {
         }
 
         const host = process.env.NEXT_PUBLIC_WS_HOST || window.location.hostname;
-        const ws = new WebSocket(`ws://${host}:8000/ws/events`);
+        const ws = new WebSocket(`ws://${host}:8000/ws/logs`);
         ws.onmessage = (ev) => {
             try {
                 const data = JSON.parse(ev.data);
@@ -80,28 +80,29 @@ export default function TracesPage() {
     const allEvents = isLive ? [...liveEvents, ...events] : events;
 
     return (
-        <div>
-            <div className="flex items-center justify-between mb-6">
-                <h1 className="text-xl font-bold text-gray-100">Traces & Events</h1>
+        <div className="animate-in fade-in duration-500">
+            <div className="flex items-center justify-between mb-8">
+                <h1 className="text-2xl font-bold bg-gradient-to-br from-zinc-100 to-zinc-500 bg-clip-text text-transparent">Traces & Events</h1>
                 <div className="flex items-center gap-3">
                     <button onClick={toggleLive}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors
-              ${isLive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-600'}`}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium border transition-all shadow-sm
+              ${isLive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-zinc-800 text-zinc-300 border-zinc-700/50 hover:border-zinc-600 hover:bg-zinc-700'}`}
                     >
-                        <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
-                        {isLive ? 'Live' : 'Go Live'}
+                        <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-zinc-500'}`} />
+                        {isLive ? 'Live Stream Active' : 'Go Live'}
                     </button>
-                    <button onClick={fetchEvents} className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400" title="Refresh">
-                        <RefreshCw className="w-4 h-4" />
+                    <button onClick={fetchEvents} className="p-2 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 text-zinc-400 hover:text-zinc-200 transition-all" title="Refresh Events">
+                        <RefreshCw className="w-[18px] h-[18px]" />
                     </button>
                 </div>
             </div>
 
             {/* Filters */}
-            <div className="flex gap-3 mb-4">
+            <div className="flex bg-zinc-900/40 p-3 rounded-2xl border border-zinc-800/50 gap-3 mb-6 items-center">
+                <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider pl-2 hidden sm:block">Filter Logs</span>
                 <select value={filterType} onChange={e => setFilterType(e.target.value)}
-                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300">
-                    <option value="">All types</option>
+                    className="bg-zinc-800/80 border border-zinc-700/50 rounded-lg px-4 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer transition-all">
+                    <option value="">All Types</option>
                     <option value="request">Request</option>
                     <option value="response">Response</option>
                     <option value="retrieval">Retrieval</option>
@@ -110,8 +111,8 @@ export default function TracesPage() {
                     <option value="system">System</option>
                 </select>
                 <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)}
-                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300">
-                    <option value="">All levels</option>
+                    className="bg-zinc-800/80 border border-zinc-700/50 rounded-lg px-4 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer transition-all">
+                    <option value="">All Levels</option>
                     <option value="info">Info</option>
                     <option value="warning">Warning</option>
                     <option value="error">Error</option>
@@ -121,43 +122,54 @@ export default function TracesPage() {
 
             {/* Events list */}
             {loading ? (
-                <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-indigo-400" /></div>
+                <div className="flex items-center justify-center py-20 bg-zinc-900/20 rounded-2xl border border-zinc-800/50"><Loader2 className="w-8 h-8 animate-spin text-blue-500/60" /></div>
             ) : allEvents.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                    <Activity className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                    <p>No events found.</p>
+                <div className="text-center py-24 bg-zinc-900/20 rounded-2xl border border-zinc-800/50 flex flex-col items-center justify-center">
+                    <div className="bg-zinc-800/50 p-6 rounded-full mb-4">
+                        <Activity className="w-10 h-10 text-zinc-600" />
+                    </div>
+                    <p className="text-zinc-400 font-medium">No system events or traces found.</p>
                 </div>
             ) : (
-                <div className="space-y-1">
+                <div className="space-y-1.5 bg-zinc-900/30 rounded-2xl p-2 border border-zinc-800/40">
                     {allEvents.map((ev, idx) => {
                         const key = ev.event_id || `${ev.trace_id}-${idx}`;
                         const isExpanded = expandedId === key;
                         return (
-                            <div key={key} className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+                            <div key={key} className="bg-zinc-900 border border-zinc-800/50 rounded-xl overflow-hidden hover:border-zinc-700/50 transition-colors">
                                 <button
                                     onClick={() => setExpandedId(isExpanded ? null : key)}
-                                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800/50 text-left text-sm"
+                                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/40 text-left text-sm transition-colors"
                                 >
-                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
-                                    <span className={`text-xs px-2 py-0.5 rounded-full border ${TYPE_COLORS[ev.event_type] || TYPE_COLORS.system}`}>
+                                    {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-500 flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-zinc-500 flex-shrink-0" />}
+                                    <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${TYPE_COLORS[ev.event_type] || TYPE_COLORS.system}`}>
                                         {ev.event_type}
                                     </span>
-                                    <span className={`text-xs ${LEVEL_COLORS[ev.level] || 'text-gray-400'}`}>{ev.level}</span>
-                                    <span className="flex-1 text-gray-300 truncate">{ev.message}</span>
-                                    <span className="text-xs text-gray-600 flex-shrink-0">
-                                        {new Date(ev.timestamp).toLocaleTimeString()}
+                                    <span className={`text-xs font-semibold uppercase tracking-wider ${LEVEL_COLORS[ev.level] || 'text-zinc-500'}`}>{ev.level}</span>
+                                    <span className="flex-1 text-zinc-300 truncate font-mono text-[13px]">{ev.message}</span>
+                                    <span className="text-xs text-zinc-500 font-mono tracking-tighter flex-shrink-0 bg-zinc-950/50 px-2 py-1 rounded-md border border-zinc-800/50">
+                                        {new Date(ev.timestamp).toLocaleTimeString(undefined, { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}
                                     </span>
                                 </button>
                                 {isExpanded && (
-                                    <div className="border-t border-gray-800 px-4 py-3 text-xs space-y-1.5">
-                                        <div className="flex gap-8">
-                                            <span className="text-gray-500">Trace: <span className="text-gray-400 font-mono">{ev.trace_id || '—'}</span></span>
-                                            <span className="text-gray-500">User: <span className="text-gray-400">{ev.user_email || ev.user_id || '—'}</span></span>
+                                    <div className="border-t border-zinc-800/50 bg-zinc-950/40 px-5 py-4 text-sm animate-in slide-in-from-top-1 duration-200">
+                                        <div className="flex flex-col sm:flex-row gap-4 sm:gap-8 mb-4">
+                                            <span className="text-zinc-500 flex items-center gap-2">
+                                                <span className="text-[10px] uppercase tracking-wider font-semibold">Trace ID:</span>
+                                                <span className="text-xs text-zinc-300 font-mono bg-zinc-900 px-2 py-1 rounded border border-zinc-800">{ev.trace_id || '—'}</span>
+                                            </span>
+                                            <span className="text-zinc-500 flex items-center gap-2">
+                                                <span className="text-[10px] uppercase tracking-wider font-semibold">User:</span>
+                                                <span className="text-xs text-zinc-300 font-medium bg-zinc-900 px-2 py-1 rounded border border-zinc-800">{ev.user_email || ev.user_id || 'System'}</span>
+                                            </span>
                                         </div>
                                         {ev.data && (
-                                            <pre className="mt-2 bg-gray-950 rounded-lg p-3 overflow-x-auto text-gray-400 text-xs">
-                                                {typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data, null, 2)}
-                                            </pre>
+                                            <div className="relative">
+                                                <div className="absolute top-0 left-0 text-[10px] font-bold text-zinc-600 uppercase tracking-widest px-3 py-1 bg-zinc-900 border-b border-r border-zinc-800/80 rounded-br-lg rounded-tl-lg z-10">Data Payload</div>
+                                                <pre className="mt-1 bg-zinc-950/80 border border-zinc-800/50 rounded-xl p-4 pt-8 overflow-x-auto text-zinc-400 font-mono text-xs shadow-inner custom-scrollbar">
+                                                    {typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data, null, 2)}
+                                                </pre>
+                                            </div>
                                         )}
                                     </div>
                                 )}

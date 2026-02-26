@@ -24,6 +24,7 @@ from .observability import (
 )
 from .query_filters import extract_filters_from_query, build_enhanced_query
 from .pdf_extractor import extract_pdf_with_tables
+from .pptx_extractor import extract_pptx_content
 
 logger = logging.getLogger(__name__)
 
@@ -87,21 +88,39 @@ def _caption_images(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return image_chunks
 
 
-def process_pdf(file_path: str, group_id: int, metadata: Dict[str, Any] = {}) -> int:
+def process_document(
+    file_path: str, group_id: int, metadata: Dict[str, Any] = {}
+) -> int:
     """
-    Process a PDF file: extract text with tables + OCR fallback, chunk,
+    Process a document (PDF or PPTX): extract text with tables + OCR fallback, chunk,
     embed (dense + sparse), caption images, and store in Qdrant.
 
     Args:
-        file_path: Path to PDF file
+        file_path: Path to document file
         group_id: Group ID for access control
         metadata: Additional metadata to store
 
     Returns:
         Number of chunks processed
     """
-    # Use enhanced extraction with table detection + hybrid OCR
-    pages = extract_pdf_with_tables(file_path)
+    ext = file_path.lower()
+    if ext.endswith(".pdf"):
+        # Use enhanced extraction with table detection + hybrid OCR
+        pages = extract_pdf_with_tables(file_path)
+    elif ext.endswith(".pptx"):
+        pages = extract_pptx_content(file_path)
+    elif ext.endswith(".ppt"):
+        from .pptx_extractor import convert_ppt_to_pdf
+
+        pdf_path = convert_ppt_to_pdf(file_path)
+        if not pdf_path or not __import__("os").path.exists(pdf_path):
+            logger.error(f"Failed to convert legacy PPT to PDF: {file_path}")
+            return 0
+        logger.info(f"Successfully converted {file_path} to PDF, extracting...")
+        pages = extract_pdf_with_tables(pdf_path)
+    else:
+        logger.error(f"Unsupported file type for {file_path}")
+        return 0
 
     # Log extraction methods used
     methods = {}

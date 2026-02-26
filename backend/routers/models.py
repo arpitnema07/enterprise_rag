@@ -85,8 +85,8 @@ def list_models():
     ollama_models = _fetch_ollama_models()
 
     # Only show cloud models if API key is configured
-    # cloud_models = CLOUD_MODELS if NVIDIA_API_KEY else []
-    cloud_models = []
+    cloud_models = CLOUD_MODELS if NVIDIA_API_KEY else []
+    # cloud_models = []
 
     return {
         "ollama": ollama_models,

@@ -57,7 +57,7 @@ def process_document_task(self, doc_id: int):
         # Process through RAG pipeline
         from backend.rag import pipeline as rag_pipeline
 
-        num_chunks = rag_pipeline.process_pdf(
+        num_chunks = rag_pipeline.process_document(
             local_path, doc.group_id, {"filename": doc.filename}
         )
 

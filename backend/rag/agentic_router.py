@@ -58,6 +58,9 @@ class AgentState(TypedDict):
     retrieval_ms: float
     generation_ms: float
 
+    # Streaming
+    stream_queue: Any
+
 
 def classify_intent_node(state: AgentState) -> AgentState:
     """Classify the user's intent."""
@@ -81,6 +84,11 @@ def handle_greeting_node(state: AgentState) -> AgentState:
 
     emit(EventType.RESPONSE, "Greeting response generated")
 
+    stream_q = state.get("stream_queue")
+    if stream_q:
+        stream_q.put(response)
+        stream_q.put(None)
+
     return {
         **state,
         "response": response,
@@ -95,6 +103,11 @@ def handle_out_of_scope_node(state: AgentState) -> AgentState:
     response = get_out_of_scope_response(state["query"])
 
     emit(EventType.RESPONSE, "Out-of-scope response generated")
+
+    stream_q = state.get("stream_queue")
+    if stream_q:
+        stream_q.put(response)
+        stream_q.put(None)
 
     return {
         **state,
@@ -202,6 +215,10 @@ def generate_node(state: AgentState) -> AgentState:
 
     if not chunks:
         response = "I couldn't find relevant information in the uploaded documents for your query."
+        stream_q = state.get("stream_queue")
+        if stream_q:
+            stream_q.put(response)
+            stream_q.put(None)
     else:
         # Format context
         context = format_context(chunks)
@@ -218,12 +235,27 @@ def generate_node(state: AgentState) -> AgentState:
         prompt_parts = get_system_prompt(prompt_type, context, state["query"], history)
 
         # Generate response with separate system and user prompts
-        response = _invoke_llm(
-            prompt_parts["user_prompt"],
-            system_prompt=prompt_parts["system_prompt"],
-            model_provider=state.get("model_provider"),
-            model_name=state.get("model_name"),
-        )
+        stream_q = state.get("stream_queue")
+        if stream_q:
+            from .generation import _invoke_llm_stream
+
+            response = ""
+            for chunk in _invoke_llm_stream(
+                prompt_parts["user_prompt"],
+                system_prompt=prompt_parts["system_prompt"],
+                model_provider=state.get("model_provider"),
+                model_name=state.get("model_name"),
+            ):
+                response += chunk
+                stream_q.put(chunk)
+            stream_q.put(None)  # Signal end of stream
+        else:
+            response = _invoke_llm(
+                prompt_parts["user_prompt"],
+                system_prompt=prompt_parts["system_prompt"],
+                model_provider=state.get("model_provider"),
+                model_name=state.get("model_name"),
+            )
 
     generation_ms = (time.time() - start) * 1000
 
@@ -317,12 +349,13 @@ def run_agentic_query(
     history: List[Dict[str, str]] = None,
     model_provider: str = None,
     model_name: str = None,
+    stream_queue: Any = None,
 ) -> Dict[str, Any]:
     """
-    Run a query through the agentic router.
+    Entry point for running a query through the agentic graph.
 
     Args:
-        query: User's query
+        query: The user question
         group_ids: List of accessible group IDs
         user_id: User ID for logging
         session_id: Session ID for conversation
@@ -331,6 +364,7 @@ def run_agentic_query(
         history: Conversation history
         model_provider: LLM provider override ("ollama" or "nvidia")
         model_name: LLM model name override
+        stream_queue: Optional queue for SSE streaming
 
     Returns:
         Dict with response, sources, intent, and timing info
@@ -357,6 +391,7 @@ def run_agentic_query(
         "sources": [],
         "retrieval_ms": 0.0,
         "generation_ms": 0.0,
+        "stream_queue": stream_queue,
     }
 
     trace_id = generate_trace_id()

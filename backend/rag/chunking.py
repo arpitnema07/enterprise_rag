@@ -32,16 +32,16 @@ def chunk_text(text: str, chunk_size: int = 200, overlap: int = 40) -> List[str]
     return chunks
 
 
-def chunk_pdf_pages(
+def chunk_document_pages(
     pages: List[Dict[str, Any]], chunk_size: int = 300, overlap: int = 50
 ) -> List[Dict[str, Any]]:
     """
-    Chunk text from PDF pages with table awareness.
-    Tables are kept as single chunks to preserve structure.
+    Chunk text from document pages (PDF/PPTX) with format-awareness.
+    Tables are kept as single chunks. PPTX slides are kept as single chunks where possible.
 
     Args:
-        pages: List of dicts with 'text', 'page_number', and optionally 'tables' keys
-        chunk_size: Number of words per chunk (increased for better context)
+        pages: List of dicts with 'text', 'page_number', 'extraction_method' keys
+        chunk_size: Number of words per chunk
         overlap: Number of words to overlap
 
     Returns:
@@ -52,9 +52,31 @@ def chunk_pdf_pages(
     for page in pages:
         page_text = page.get("text", "")
         page_num = page.get("page_number", 1)
+        method = page.get("extraction_method", "")
+
+        # PPTX Strategy: One slide is conceptually one semantic unit
+        if method == "python-pptx":
+            word_count = len(page_text.split())
+            if (
+                word_count <= chunk_size * 1.5
+            ):  # Allow slightly larger chunks for slides
+                if page_text.strip():
+                    all_chunks.append(
+                        {
+                            "text": page_text,
+                            "page_number": page_num,
+                            "chunk_type": "slide",
+                        }
+                    )
+                continue
+            # If the slide is massive, fall through to standard chunking
 
         # Check if page has table markers
-        if "[TABLE" in page_text or "### Table" in page_text:
+        if (
+            "[TABLE" in page_text
+            or "### Table" in page_text
+            or "--- Table Data ---" in page_text
+        ):
             # Split content by table markers
             chunks = _chunk_with_tables(page_text, page_num, chunk_size, overlap)
             all_chunks.extend(chunks)
@@ -67,6 +89,13 @@ def chunk_pdf_pages(
                 )
 
     return all_chunks
+
+
+# For backward compatibility with pipeline.py if it still calls chunk_pdf_pages:
+def chunk_pdf_pages(
+    pages: List[Dict[str, Any]], chunk_size: int = 300, overlap: int = 50
+) -> List[Dict[str, Any]]:
+    return chunk_document_pages(pages, chunk_size, overlap)
 
 
 def _chunk_with_tables(

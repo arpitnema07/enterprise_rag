@@ -4,17 +4,20 @@ import { useState, useEffect } from 'react';
 import api from '@/lib/api';
 import {
     CheckCircle, XCircle, Loader2, RefreshCw, Zap, Database,
-    HardDrive, Server, AlertTriangle
+    HardDrive, Server, AlertTriangle, Save, Settings
 } from 'lucide-react';
 
 interface HealthStatus {
     [key: string]: { status: string;[key: string]: any };
 }
 
-interface LLMStatus {
+interface LLMConfig {
     provider: string;
     model: string;
-    base_url?: string;
+    endpoint: string;
+    ollama_model: string;
+    nvidia_model: string;
+    ollama_base_url: string;
 }
 
 const SERVICE_ICONS: Record<string, any> = {
@@ -28,10 +31,17 @@ const SERVICE_ICONS: Record<string, any> = {
 
 export default function ConfigPage() {
     const [health, setHealth] = useState<HealthStatus>({});
-    const [llm, setLlm] = useState<LLMStatus | null>(null);
+    const [llm, setLlm] = useState<LLMConfig | null>(null);
     const [loading, setLoading] = useState(true);
     const [reindexing, setReindexing] = useState(false);
     const [reindexResult, setReindexResult] = useState<any>(null);
+
+    // Editable LLM config
+    const [editProvider, setEditProvider] = useState('');
+    const [editOllamaModel, setEditOllamaModel] = useState('');
+    const [editNvidiaModel, setEditNvidiaModel] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
     const fetchHealth = () => {
         setLoading(true);
@@ -42,12 +52,38 @@ export default function ConfigPage() {
             .then(([h, l]) => {
                 setHealth(h.data);
                 setLlm(l.data);
+                setEditProvider(l.data.provider);
+                setEditOllamaModel(l.data.ollama_model);
+                setEditNvidiaModel(l.data.nvidia_model);
             })
             .catch(console.error)
             .finally(() => setLoading(false));
     };
 
     useEffect(() => { fetchHealth(); }, []);
+
+    const handleSaveConfig = async () => {
+        setSaving(true);
+        setSaveMsg(null);
+        try {
+            const res = await api.put('/admin/llm-config', {
+                provider: editProvider,
+                ollama_model: editOllamaModel,
+                nvidia_model: editNvidiaModel,
+            });
+            setLlm(res.data);
+            setSaveMsg({ ok: true, text: `Switched to ${res.data.provider} — ${res.data.model}` });
+        } catch (err: any) {
+            setSaveMsg({ ok: false, text: err.response?.data?.detail || 'Failed to update config' });
+        }
+        setSaving(false);
+    };
+
+    const hasChanges = llm && (
+        editProvider !== llm.provider ||
+        editOllamaModel !== llm.ollama_model ||
+        editNvidiaModel !== llm.nvidia_model
+    );
 
     const handleReindex = async () => {
         if (!confirm('This will re-process all documents. Proceed?')) return;
@@ -73,21 +109,87 @@ export default function ConfigPage() {
                 </button>
             </div>
 
-            {/* LLM Provider */}
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">LLM Provider</h2>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6">
-                {llm ? (
-                    <div className="flex items-center gap-4">
-                        <Zap className="w-5 h-5 text-amber-400" />
-                        <div>
-                            <p className="text-sm font-medium text-gray-200">{llm.provider}</p>
-                            <p className="text-xs text-gray-500">{llm.model}</p>
-                            {llm.base_url && <p className="text-xs text-gray-600">{llm.base_url}</p>}
-                        </div>
+            {/* LLM Provider Settings */}
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                <Settings className="w-3.5 h-3.5 inline mr-1.5" />
+                LLM Provider
+            </h2>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6 space-y-4">
+                {/* Provider Toggle */}
+                <div>
+                    <label className="block text-xs text-gray-500 mb-2">Active Provider</label>
+                    <div className="flex gap-2">
+                        {['ollama', 'nvidia'].map(p => (
+                            <button
+                                key={p}
+                                onClick={() => setEditProvider(p)}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${editProvider === p
+                                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-300'
+                                    }`}
+                            >
+                                {p === 'ollama' ? '🦙 Ollama (Local)' : '⚡ NVIDIA (Cloud)'}
+                            </button>
+                        ))}
                     </div>
-                ) : (
-                    <p className="text-sm text-gray-500">Unable to fetch LLM status</p>
-                )}
+                </div>
+
+                {/* Model Inputs */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs text-gray-500 mb-1.5">Ollama Model</label>
+                        <input
+                            type="text"
+                            value={editOllamaModel}
+                            onChange={e => setEditOllamaModel(e.target.value)}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                            placeholder="e.g. gemma3:4b"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs text-gray-500 mb-1.5">NVIDIA Model</label>
+                        <input
+                            type="text"
+                            value={editNvidiaModel}
+                            onChange={e => setEditNvidiaModel(e.target.value)}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                            placeholder="e.g. moonshotai/kimi-k2-instruct"
+                        />
+                    </div>
+                </div>
+
+                {/* Active Config Display */}
+                <div className="flex items-center gap-3 bg-gray-800/50 rounded-lg px-3 py-2">
+                    <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div className="text-xs">
+                        <span className="text-gray-500">Active: </span>
+                        <span className="text-gray-300 font-medium">{llm?.provider}</span>
+                        <span className="text-gray-600 mx-1">→</span>
+                        <span className="text-gray-400">{llm?.model}</span>
+                    </div>
+                </div>
+
+                {/* Save */}
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={handleSaveConfig}
+                        disabled={!hasChanges || saving}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-all"
+                    >
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        {saving ? 'Saving...' : 'Save Changes'}
+                    </button>
+                    {saveMsg && (
+                        <span className={`text-xs ${saveMsg.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {saveMsg.text}
+                        </span>
+                    )}
+                </div>
+
+                <p className="text-xs text-gray-600">
+                    Changes take effect immediately. Vision OCR and embeddings always use Ollama regardless of this setting.
+                    Restarting the server resets to .env defaults.
+                </p>
             </div>
 
             {/* Service Health */}

@@ -97,8 +97,8 @@ def hybrid_search(
     dense_vector: List[float],
     sparse_vector: Dict,
     group_ids: List[int],
-    limit: int = 10,
-    prefetch_limit: int = 20,
+    limit: int = 20,
+    prefetch_limit: int = 40,
     filters: Optional[Dict] = None,
 ) -> List[Any]:
     """
@@ -122,36 +122,10 @@ def hybrid_search(
     ]
 
     # Add optional metadata filters
-    if filters:
-        # Filter by doc_id (extracted from query like ETR_02_24_12)
-        if filters.get("doc_id"):
-            must_conditions.append(
-                rest.FieldCondition(
-                    key="metadata.doc_id",
-                    match=rest.MatchText(text=filters["doc_id"]),
-                )
-            )
-        if filters.get("test_type"):
-            must_conditions.append(
-                rest.FieldCondition(
-                    key="metadata.test_type",
-                    match=rest.MatchValue(value=filters["test_type"]),
-                )
-            )
-        if filters.get("vehicle_model"):
-            must_conditions.append(
-                rest.FieldCondition(
-                    key="metadata.vehicle_model",
-                    match=rest.MatchText(text=filters["vehicle_model"]),
-                )
-            )
-        if filters.get("compliance_status"):
-            must_conditions.append(
-                rest.FieldCondition(
-                    key="metadata.compliance_status",
-                    match=rest.MatchAny(any=filters["compliance_status"]),
-                )
-            )
+    # We no longer apply strict Qdrant MUST filters for extracted terms like
+    # vehicle_model or test_type because the document metadata extraction is
+    # imperfect and returning 0 chunks.
+    # The enhanced query string already boosts these terms via BM25 organic ranking.
 
     filter_condition = rest.Filter(must=must_conditions)
 

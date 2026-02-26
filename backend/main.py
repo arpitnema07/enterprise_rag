@@ -50,9 +50,17 @@ try:
 except Exception as e:
     print(f"WARNING: Failed to ensure Qdrant collection: {e}")
 
+# Ensure ClickHouse Events Table Exists
+try:
+    from .services.clickhouse_client import ensure_table_exists
+
+    ensure_table_exists()
+except Exception as e:
+    print(f"WARNING: Failed to ensure ClickHouse events table: {e}")
+
 # CORS — Locked down to known frontend origins
 ALLOWED_ORIGINS = os.getenv(
-    "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://it54376:3000"
 ).split(",")
 
 app.add_middleware(

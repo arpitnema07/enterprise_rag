@@ -37,54 +37,58 @@ export default function UsersPage() {
         }
     };
 
-    if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-indigo-400" /></div>;
+    if (loading) return <div className="flex items-center justify-center py-20 bg-zinc-900/20 rounded-2xl border border-zinc-800/50"><Loader2 className="w-8 h-8 animate-spin text-blue-500/60" /></div>;
 
     return (
-        <div>
-            <h1 className="text-xl font-bold text-gray-100 mb-6">Users</h1>
+        <div className="animate-in fade-in duration-500">
+            <h1 className="text-2xl font-bold bg-gradient-to-br from-zinc-100 to-zinc-500 bg-clip-text text-transparent mb-6">Users</h1>
 
-            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                    <thead>
-                        <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase">
-                            <th className="text-left px-4 py-3">Email</th>
-                            <th className="text-left px-4 py-3">Role</th>
-                            <th className="text-left px-4 py-3">Joined</th>
-                            <th className="text-right px-4 py-3">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {users.map(user => (
-                            <tr key={user.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                                <td className="px-4 py-3 text-gray-200">{user.email}</td>
-                                <td className="px-4 py-3">
-                                    {user.is_admin ? (
-                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                            <Shield className="w-3 h-3" /> Admin
-                                        </span>
-                                    ) : (
-                                        <span className="text-xs text-gray-500">User</span>
-                                    )}
-                                </td>
-                                <td className="px-4 py-3 text-gray-500 text-xs">
-                                    {new Date(user.created_at).toLocaleDateString()}
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                    <div className="flex items-center justify-end gap-1">
-                                        <button onClick={() => handleToggleAdmin(user.id)}
-                                            className="p-1.5 rounded hover:bg-gray-700 text-gray-400" title={user.is_admin ? 'Remove admin' : 'Make admin'}>
-                                            {user.is_admin ? <ShieldOff className="w-3.5 h-3.5" /> : <Shield className="w-3.5 h-3.5" />}
-                                        </button>
-                                        <button onClick={() => handleDelete(user.id)}
-                                            className="p-1.5 rounded hover:bg-gray-700 text-red-400" title="Delete">
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                </td>
+            <div className="bg-zinc-900/50 backdrop-blur-sm border border-zinc-800/60 rounded-2xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b border-zinc-800/60 bg-zinc-900 text-zinc-500 text-[10px] font-semibold uppercase tracking-wider">
+                                <th className="text-left px-5 py-4">Email</th>
+                                <th className="text-left px-5 py-4">Role</th>
+                                <th className="text-left px-5 py-4">Joined</th>
+                                <th className="text-right px-5 py-4">Actions</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-800/40">
+                            {users.map(user => (
+                                <tr key={user.id} className="hover:bg-zinc-800/30 transition-colors group">
+                                    <td className="px-5 py-4 text-zinc-200 font-medium">{user.email}</td>
+                                    <td className="px-5 py-4">
+                                        {user.is_admin ? (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border bg-zinc-950/50 border-blue-500/20 text-blue-400">
+                                                <Shield className="w-3.5 h-3.5" /> Admin
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium border bg-zinc-950/50 border-zinc-700/50 text-zinc-400">
+                                                User
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-5 py-4 text-zinc-500 text-xs font-mono">
+                                        {new Date(user.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    </td>
+                                    <td className="px-5 py-4 text-right">
+                                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => handleToggleAdmin(user.id)}
+                                                className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-500 hover:text-blue-400 transition-colors" title={user.is_admin ? 'Remove admin role' : 'Make admin'}>
+                                                {user.is_admin ? <ShieldOff className="w-[18px] h-[18px]" /> : <Shield className="w-[18px] h-[18px]" />}
+                                            </button>
+                                            <button onClick={() => handleDelete(user.id)}
+                                                className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-500 hover:text-red-400 transition-colors" title="Delete User">
+                                                <Trash2 className="w-[18px] h-[18px]" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );
